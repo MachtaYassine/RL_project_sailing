@@ -215,7 +215,17 @@ def test_agent_actions(agent_instance: BaseAgent) -> List[str]:
                 break
                 
         except Exception as e:
-            issues.append(f"Error during agent action: {str(e)}")
+            import traceback
+            tb = traceback.format_exc()
+            # Optionally, get the last traceback frame for line number
+            tb_lines = traceback.extract_tb(e.__traceback__)
+            if tb_lines:
+                last_frame = tb_lines[-1]
+                line_info = f" (File \"{last_frame.filename}\", line {last_frame.lineno})"
+            else:
+                line_info = ""
+            issues.append(f"Error during agent action: {str(e)}{line_info}\nTraceback:\n{tb}")
+            break
             break
     
     return issues
@@ -257,7 +267,7 @@ def validate_agent(filepath: str) -> Dict[str, Any]:
         if missing_methods:
             results['errors'].extend(missing_methods)
             return results
-        
+        print(f"{GREEN}Agent class {results['agent_name']} has all required methods.{RESET}")
         # Step 3: Instantiate the agent
         try:
             agent_instance = agent_class()
@@ -267,13 +277,13 @@ def validate_agent(filepath: str) -> Dict[str, Any]:
                 f"Make sure your agent's __init__ method accepts no arguments."
             )
             return results
-        
+        print(f"{GREEN}Agent class {results['agent_name']} instantiated successfully.{RESET}")
         # Step 4: Test agent actions
         action_issues = test_agent_actions(agent_instance)
         if action_issues:
             results['errors'].extend(action_issues)
             return results
-        
+        print(f"{GREEN}Agent class {results['agent_name']} returned valid actions.{RESET}")
         # All tests passed
         results['valid'] = True
         

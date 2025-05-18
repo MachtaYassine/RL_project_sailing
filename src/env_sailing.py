@@ -188,6 +188,8 @@ class SailingEnv(gym.Env): # type: ignore
         
         # Get current wind at boat's position
         current_wind = self._get_wind_at_position(self.position)
+        # print("float type of current wind:", current_wind.dtype)
+
         
         # Calculate new velocity based on sailing physics
         self.velocity = self._calculate_new_velocity(
@@ -535,6 +537,7 @@ class SailingEnv(gym.Env): # type: ignore
     def _get_wind_at_position(self, position):
         """Get wind vector at given position."""
         x, y = position
+        
         # Numpy arrays are indexed with [y, x] order
         return self.wind_field[int(y), int(x)]
     
@@ -552,6 +555,9 @@ class SailingEnv(gym.Env): # type: ignore
         """
         # Calculate angle between wind and direction
         wind_norm = np.linalg.norm(wind)
+        # print("Wind norm:", wind_norm)
+        # print("Wind vector:", wind)
+        # print("Direction vector:", direction)
         if wind_norm > 0:
             wind_normalized = wind / wind_norm
             direction_norm = np.linalg.norm(direction)
@@ -579,6 +585,15 @@ class SailingEnv(gym.Env): # type: ignore
             speed = np.linalg.norm(new_velocity)
             if speed > self.max_speed:
                 new_velocity = (new_velocity / speed) * self.max_speed
+            # print("New velocity:", new_velocity)
+            # print("Speed:", speed)
+            # print("Theoretical velocity:", theoretical_velocity)
+            # print("Sailing efficiency:", sailing_efficiency)
+            # print("Inertia factor:", self.inertia_factor)
+            # print("Current velocity:", current_velocity)
+            # print("Direction normalized:", direction_normalized)
+            # print("Wind normalized:", wind_normalized)
+            
         else:
             # If no wind, just maintain some inertia
             new_velocity = self.inertia_factor * current_velocity
