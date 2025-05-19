@@ -82,6 +82,84 @@ SIMPLE_STATIC_INITIAL_WINDFIELD = {
     }
 }
 
+
+
+# Training Initial Windfield 4: Strong East Wind (with Upwind Component)
+# Characteristics: East-southeast wind pushing the agent off-course (against north)
+TRAINING_INITIAL_WINDFIELD_4 = {
+    'wind_init_params': {
+        'base_speed': 3.5,
+        'base_direction': (1.0, -0.3),  # East-Southeast wind (upwind)
+        'pattern_scale': 64,
+        'pattern_strength': 0.5,
+        'strength_variation': 0.35,
+        'noise': 0.15
+    },
+    'wind_evol_params': COMMON_WIND_EVOL_PARAMS.copy()
+}
+
+# Training Initial Windfield 5: Chaotic Southwest Wind (with Upwind Component)
+# Characteristics: Turbulent SW wind, largely pushing against northward sailing
+TRAINING_INITIAL_WINDFIELD_5 = {
+    'wind_init_params': {
+        'base_speed': 2.8,
+        'base_direction': (-0.6, -0.6),  # Southwest wind (upwind)
+        'pattern_scale': 16,
+        'pattern_strength': 0.7,
+        'strength_variation': 0.5,
+        'noise': 0.2
+    },
+    'wind_evol_params': COMMON_WIND_EVOL_PARAMS.copy()
+}
+
+TRAINING_INITIAL_WINDFIELD_6 = {
+    'wind_init_params': {
+        'base_speed': 3.5,
+        'base_direction': (0.2, -0.9),  # Upwind with slight east bias
+        'pattern_scale': 32,
+        'pattern_strength': 0.5,
+        'strength_variation': 0.3,
+        'noise': 0.2
+    },
+    'wind_evol_params': COMMON_WIND_EVOL_PARAMS.copy()
+}
+TRAINING_INITIAL_WINDFIELD_7 = {
+    'wind_init_params': {
+        'base_speed': 2.0,
+        'base_direction': (0.6, 0.6),  # NE wind
+        'pattern_scale': 96,
+        'pattern_strength': 0.4,
+        'strength_variation': 0.2,
+        'noise': 0.2
+    },
+    'wind_evol_params': {
+        **COMMON_WIND_EVOL_PARAMS,
+        'rotation_bias': 0.1,  # Significant clockwise rotation
+        'bias_strength': 1.0
+    }
+}
+
+TRAINING_INITIAL_WINDFIELD_8 = {
+    'wind_init_params': {
+        'base_speed': 3.2,
+        'base_direction': (0.0, -1.0),  # Pure upwind
+        'pattern_scale': 32,
+        'pattern_strength': 0.7,
+        'strength_variation': 0.4,
+        'noise': 0.25
+    },
+    'wind_evol_params': {
+        **COMMON_WIND_EVOL_PARAMS,
+        'wind_change_prob': 0.0,
+        'perturbation_angle_amplitude': 0.0,
+        'perturbation_strength_amplitude': 0.0,
+        'rotation_bias': 0.0,
+        'bias_strength': 0.0
+    }
+}
+
+
+
 # Dictionary mapping initial windfield names to their parameters
 INITIAL_WINDFIELDS = {
     'training_1': TRAINING_INITIAL_WINDFIELD_1,
@@ -89,6 +167,12 @@ INITIAL_WINDFIELDS = {
     'training_3': TRAINING_INITIAL_WINDFIELD_3,
     'simple_static': SIMPLE_STATIC_INITIAL_WINDFIELD
 }
+# Register them in the windfield dictionary
+INITIAL_WINDFIELDS['training_4'] = TRAINING_INITIAL_WINDFIELD_4
+INITIAL_WINDFIELDS['training_5'] = TRAINING_INITIAL_WINDFIELD_5
+INITIAL_WINDFIELDS['training_6'] = TRAINING_INITIAL_WINDFIELD_6
+INITIAL_WINDFIELDS['training_7'] = TRAINING_INITIAL_WINDFIELD_7
+INITIAL_WINDFIELDS['training_8'] = TRAINING_INITIAL_WINDFIELD_8
 
 def get_initial_windfield(name):
     """
