@@ -2,39 +2,55 @@ import numpy as np
 from agents.base_agent import BaseAgent
 from numba import njit
 import time
+from numba import cuda
+from math import acos, pi
+from typing import Optional, Tuple, List, Dict, Any
 
 class DeterministicAgent2(BaseAgent):
     """
     A deterministic agent that uses a Numba-powered A* planner to select actions,
     relying only on variables and observation, not env.
     """
+    # Action mapping as a class variable
+    ACTION_MAP = {
+        (0, 1): 0, (1, 1): 1, (1, 0): 2, (1, -1): 3,
+        (0, -1): 4, (-1, -1): 5, (-1, 0): 6, (-1, 1): 7, (0, 0): 8
+    }
+    ACTIONS = np.array([
+        [0, 1], [1, 1], [1, 0], [1, -1],
+        [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 0]
+    ], dtype=np.int32)
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Initialize the DeterministicAgent2.
+        """
         super().__init__()
         self.np_random = np.random.default_rng()
         # You must set these externally before calling act:
-        self.grid_size = (32,32)
+        self.grid_size = (32, 32)
         self.max_speed = 2.0
         self.wind_field = None
-        self.goal_position = np.array([self.grid_size[0] // 2, self.grid_size[1] - 1], dtype=np.float32)  # Example goal position
-        self.position_accumulator = np.zeros(2, dtype=np.float32)  # Example position accumulator
-        self.velocity = np.zeros(2, dtype=np.float32)  # Example velocity accumulator
-        self.position= np.zeros(2, dtype=np.float32)  # Example position
+        self.goal_position = np.array([self.grid_size[0] // 2, self.grid_size[1] - 1], dtype=np.float32)
+        self.position_accumulator = np.zeros(2, dtype=np.float32)
+        self.velocity = np.zeros(2, dtype=np.float32)
+        self.position = np.zeros(2, dtype=np.float32)
         self.heuristic_table = np.zeros((self.grid_size[0], self.grid_size[1]), dtype=np.float32)
 
     def act_a_star(self, observation: np.ndarray) -> int:
         """
         Select an action using A* if possible, otherwise use greedy direction+efficiency.
+        Args:
+            observation (np.ndarray): The current observation from the environment.
+        Returns:
+            int: The action index to take.
         """
-        # Try A* (you must set up the required attributes externally)
-        
         self.position = observation[:2]
         self.velocity = observation[2:4]
-        wind_field_flat= observation[6:]
+        wind_field_flat = observation[6:]
         self.wind_field = wind_field_flat.reshape(self.grid_size[0], self.grid_size[1], 2)
-        # print(f" Observed position and velocity: {self.position} {self.velocity}")
-        # print(f'==================')
-        # precompute heuristic table if not already done
+
+        # Precompute heuristic table if not already done
         threadsperblock = (16, 16)
         blockspergrid_x = int(np.ceil(self.grid_size[0] / threadsperblock[0]))
         blockspergrid_y = int(np.ceil(self.grid_size[1] / threadsperblock[1]))
@@ -42,7 +58,6 @@ class DeterministicAgent2(BaseAgent):
         heuristic_table_device = cuda.to_device(self.heuristic_table)
         wind_grid_device = cuda.to_device(self.wind_field)
         goal_device = cuda.to_device(self.goal_position)
-        start_time = time.time()
         compute_heuristic_cuda[(blockspergrid_x, blockspergrid_y), threadsperblock](
             heuristic_table_device,
             wind_grid_device,
@@ -51,16 +66,11 @@ class DeterministicAgent2(BaseAgent):
             self.grid_size[1]
         )
         self.heuristic_table = heuristic_table_device.copy_to_host()
-        end_time = time.time()
-        # print(f" Heuristic table computed in {end_time - start_time:.4f} seconds")
-        #check the heuristic table was changed
-        # print(f" heuristic table: {self.heuristic_table}")
-        
-        start_time = time.time()
+
         path = self.sailing_a_star_action(
             self.position,
             self.velocity,
-            self.position_accumulator,  # or your position_accumulator if you track it
+            self.position_accumulator,
             self.wind_field,
             self.grid_size,
             self.goal_position,
@@ -68,143 +78,128 @@ class DeterministicAgent2(BaseAgent):
             max_iterations=10000,
             heuristic_table=self.heuristic_table if hasattr(self, 'heuristic_table') else None
         )
-        end_time = time.time()
-        # print(f" A* pathfinding took {end_time - start_time:.4f} seconds")
-        # print(f"path is None: {path is None}")
-        # print(f"passed A* ")
-        
-
-        action_map = {
-            (0,1): 0, (1,1): 1, (1,0): 2, (1,-1): 3,
-            (0,-1): 4, (-1,-1): 5, (-1,0): 6, (-1,1): 7, (0,0): 8
-        }
 
         if path is not None and len(path) > 1:
-            direction = tuple(path[1]['direction'])
-            direction=(direction[0].astype(np.int32), direction[1].astype(np.int32))
-            action = action_map.get(direction, 8)
+            direction = tuple(np.array(path[1]['direction']).astype(np.int32))
+            action = self.ACTION_MAP.get(direction, 8)
             self.position = path[1]['pos']
             self.position_accumulator = path[1]['acc']
             self.velocity = path[1]['velocity']
-            # print(f"predicted position and velocity: {self.position} {self.velocity}")
             return action
         else:
-            if path is None:
-                print(f" A* path is None")
-            else:
-                print(f" A* path is too short: {len(path)}")
+            return self._greedy_fallback(observation)
 
-        # print(f" Passed path assignment")
-        # --- Fallback: Greedy direction+efficiency logic ---
+    def _greedy_fallback(self, observation: np.ndarray) -> int:
+        """
+        Fallback action selection using greedy direction and sailing efficiency.
+        Args:
+            observation (np.ndarray): The current observation from the environment.
+        Returns:
+            int: The action index to take.
+        """
         x, y = observation[0], observation[1]
         wx, wy = observation[4], observation[5]
         current_pos = np.array([x, y])
         wind_vec = np.array([wx, wy])
         wind_norm = np.linalg.norm(wind_vec)
-        if wind_norm > 1e-8:
-            wind_dir = wind_vec / wind_norm
-        else:
-            wind_dir = np.array([0.0, 0.0])
+        wind_dir = wind_vec / wind_norm if wind_norm > 1e-8 else np.array([0.0, 0.0])
 
         direction_to_goal = self.goal_position - current_pos
         direction_to_goal_norm = np.linalg.norm(direction_to_goal)
-        if direction_to_goal_norm > 1e-8:
-            direction_to_goal = direction_to_goal / direction_to_goal_norm
-        else:
-            direction_to_goal = np.array([0.0, 0.0])
+        direction_to_goal = direction_to_goal / direction_to_goal_norm if direction_to_goal_norm > 1e-8 else np.array([0.0, 0.0])
 
-        directions = np.array([
-            [0, 1], [1, 1], [1, 0], [1, -1],
-            [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 0]
-        ])
-        # print(f' starting scores')
         scores = []
-        for d in directions:
+        for d in self.ACTIONS:
             d_norm = d / np.linalg.norm(d) if np.linalg.norm(d) > 1e-8 else d
             similarity = np.dot(d_norm, direction_to_goal)
             efficiency = self.calculate_sailing_efficiency(d_norm, wind_dir)
             score = 0.7 * similarity + 0.3 * efficiency
             scores.append(score)
-        # print(f' finished scores')
         best_idx = np.argmax(scores)
-        best_direction = tuple(directions[best_idx])
-        action = action_map[best_direction]
-        # print(f"action is {action}")
+        best_direction = tuple(self.ACTIONS[best_idx])
+        action = self.ACTION_MAP[best_direction]
         return action
 
     def reset(self) -> None:
+        """
+        Reset the agent's internal state if needed.
+        """
         pass
 
     def seed(self, seed: int = None) -> None:
+        """
+        Seed the agent's random number generator.
+        Args:
+            seed (int, optional): The seed value.
+        """
         self.np_random = np.random.default_rng(seed)
 
     def save(self, path: str) -> None:
+        """
+        Save the agent's state to a file.
+        Args:
+            path (str): The file path to save to.
+        """
         pass
 
     def load(self, path: str) -> None:
+        """
+        Load the agent's state from a file.
+        Args:
+            path (str): The file path to load from.
+        """
         pass
-
-    
 
     def act(self, observation: np.ndarray) -> int:
         """
         Use the precomputed value iteration policy to select an action.
+        Args:
+            observation (np.ndarray): The current observation from the environment.
+        Returns:
+            int: The action index to take.
         """
-        
         return self.act_a_star(observation)
-
-    def precompute_heuristic_table(self):
-        """
-        Precompute the heuristic for all grid positions and store in self.heuristic_table.
-        Assumes wind_field and goal_position are set.
-        """
-        grid_x, grid_y = self.grid_size
-        self.heuristic_table = np.zeros((grid_x, grid_y), dtype=np.float32)
-        goal = self.goal_position
-        wind_grid = self.wind_field
-        for x in range(grid_x):
-            for y in range(grid_y):
-                pos = np.array([x, y], dtype=np.float32)
-                dist = (np.linalg.norm(pos - goal)) ** 1.2
-                wind = wind_grid[y, x]
-                wind_norm = np.linalg.norm(wind)
-                direction_to_goal = goal - pos
-                if np.linalg.norm(direction_to_goal) > 1e-8:
-                    direction_to_goal /= np.linalg.norm(direction_to_goal)
-                else:
-                    direction_to_goal = np.zeros(2)
-                wind_dir = wind / wind_norm if wind_norm > 1e-8 else np.zeros(2)
-                wind_from = -wind_dir
-                angle = np.arccos(np.clip(np.dot(wind_from, direction_to_goal), -1.0, 1.0))
-                penalty = 1.0
-                if angle < np.pi/4:
-                    penalty = 2.0
-                elif angle < np.pi/2:
-                    penalty = 1.5 + 0.5 * (angle - np.pi/4) / (np.pi/4)
-                elif angle < 3*np.pi/4:
-                    penalty = 1.0
-                else:
-                    penalty = 1.0 - 0.5 * (angle - 3*np.pi/4) / (np.pi/4)
-                    penalty = max(0.5, penalty)
-                self.heuristic_table[x, y] = dist * penalty
 
     @staticmethod
     def sailing_a_star_action(
-        start, velocity, acc, wind_grid, grid_size, goal, max_speed,
-        inertia_factor=0.3, boat_performance=0.4, max_iterations=None,
-        heuristic_table=None
-    ):
-        def heuristic(pos):
+        start: np.ndarray,
+        velocity: np.ndarray,
+        acc: np.ndarray,
+        wind_grid: np.ndarray,
+        grid_size: tuple,
+        goal: np.ndarray,
+        max_speed: float,
+        inertia_factor: float = 0.3,
+        boat_performance: float = 0.4,
+        max_iterations: int = None,
+        heuristic_table: np.ndarray = None
+    ) -> list:
+        """
+        Perform A* search to find a path to the goal.
+        Args:
+            start (np.ndarray): Starting position.
+            velocity (np.ndarray): Starting velocity.
+            acc (np.ndarray): Starting accumulator.
+            wind_grid (np.ndarray): Wind field grid.
+            grid_size (tuple): Size of the grid.
+            goal (np.ndarray): Goal position.
+            max_speed (float): Maximum speed.
+            inertia_factor (float): Inertia factor.
+            boat_performance (float): Boat performance factor.
+            max_iterations (int, optional): Maximum iterations for A*.
+            heuristic_table (np.ndarray, optional): Precomputed heuristic table.
+        Returns:
+            list: Path as a list of state dictionaries, or None if not found.
+        """
+        def heuristic(pos: tuple) -> float:
             x, y = int(pos[0]), int(pos[1])
             if heuristic_table is not None:
-                x = np.clip(x, 0, grid_size[0]-1)
-                y = np.clip(y, 0, grid_size[1]-1)
+                x = np.clip(x, 0, grid_size[0] - 1)
+                y = np.clip(y, 0, grid_size[1] - 1)
                 return heuristic_table[x, y]
             else:
-                print(f" Warning: heuristic_table is None, using default heuristic")
-                import sys
-                sys.exit(0)
-        
+                raise ValueError("heuristic_table is None, cannot compute heuristic.")
+
         import heapq
         open_set = []
         start_tuple = (int(start[0]), int(start[1]))
@@ -229,14 +224,11 @@ class DeterministicAgent2(BaseAgent):
                 'efficiency': 0.0
             }]
         ))
-        
-        # print(f" Initial parameters: {start_tuple} {start_velocity} {start_acc} {start_wind}")
 
         pos_with_highest_y = np.array([0, 0], dtype=np.int32)
-        highest_y=0
+        highest_y = 0
         visited = set()
         iterations = 0
-        # Ensure grid_size is always a tuple/list/array of length 2
         if isinstance(grid_size, int):
             grid_size_arr = np.array([grid_size, grid_size], dtype=np.int32)
         else:
@@ -244,7 +236,6 @@ class DeterministicAgent2(BaseAgent):
 
         while open_set:
             if max_iterations is not None and iterations >= max_iterations:
-                print(f" A* iterations exceeded: {iterations}")
                 return None
             iterations += 1
 
@@ -252,7 +243,6 @@ class DeterministicAgent2(BaseAgent):
             if current[1] > highest_y:
                 highest_y = current[1]
                 pos_with_highest_y = np.array(current, dtype=np.int32)
-                # print(f" A* new best position: {pos_with_highest_y} {highest_y}")
 
             velocity = np.array(velocity, dtype=np.float32)
             acc = np.array(acc, dtype=np.float32)
@@ -271,10 +261,8 @@ class DeterministicAgent2(BaseAgent):
                 inertia_factor
             )
             visited.add((current, tuple(np.round(velocity, 2)), tuple(np.round(acc, 2))))
-            
-            
+
             for i in range(neighbors.shape[0]):
-                
                 neighbor = tuple(neighbors[i, 0:2].astype(np.int32))
                 nvel = tuple(neighbors[i, 2:4])
                 nacc = tuple(neighbors[i, 4:6])
@@ -303,41 +291,30 @@ class DeterministicAgent2(BaseAgent):
                         'efficiency': sailing_efficiency
                     }]
                 ))
-        print(f" A* no path found, returning best position: {pos_with_highest_y}")
         return None
-    
-    def calculate_sailing_efficiency(self,boat_direction, wind_direction):
+
+    def calculate_sailing_efficiency(self, boat_direction: np.ndarray, wind_direction: np.ndarray) -> float:
         """
         Calculate sailing efficiency based on the angle between boat direction and wind.
-        
         Args:
-            boat_direction: Normalized vector of boat's desired direction
-            wind_direction: Normalized vector of wind direction (where wind is going TO)
-            
+            boat_direction (np.ndarray): Normalized vector of boat's desired direction.
+            wind_direction (np.ndarray): Normalized vector of wind direction (where wind is going TO).
         Returns:
-            sailing_efficiency: Float between 0.05 and 1.0 representing how efficiently the boat can sail
+            float: Sailing efficiency between 0.05 and 1.0.
         """
-        # Invert wind direction to get where wind is coming FROM
         wind_from = -wind_direction
-        
-        # Calculate angle between wind and direction
-        wind_angle = np.arccos(np.clip(
-            np.dot(wind_from, boat_direction), -1.0, 1.0))
-        
-        # Calculate sailing efficiency based on angle to wind
-        if wind_angle < np.pi/4:  # Less than 45 degrees to wind
-            sailing_efficiency = 0.05  # Small but non-zero efficiency in no-go zone
-        elif wind_angle < np.pi/2:  # Between 45 and 90 degrees
-            sailing_efficiency = 0.5 + 0.5 * (wind_angle - np.pi/4) / (np.pi/4)  # Linear increase to 1.0
-        elif wind_angle < 3*np.pi/4:  # Between 90 and 135 degrees
-            sailing_efficiency = 1.0  # Maximum efficiency
-        else:  # More than 135 degrees
-            sailing_efficiency = 1.0 - 0.5 * (wind_angle - 3*np.pi/4) / (np.pi/4)  # Linear decrease
-            sailing_efficiency = max(0.5, sailing_efficiency)  # But still decent
-        
-        return sailing_efficiency 
-    
-    
+        wind_angle = np.arccos(np.clip(np.dot(wind_from, boat_direction), -1.0, 1.0))
+        if wind_angle < np.pi / 4:
+            sailing_efficiency = 0.05
+        elif wind_angle < np.pi / 2:
+            sailing_efficiency = 0.5 + 0.5 * (wind_angle - np.pi / 4) / (np.pi / 4)
+        elif wind_angle < 3 * np.pi / 4:
+            sailing_efficiency = 1.0
+        else:
+            sailing_efficiency = 1.0 - 0.5 * (wind_angle - 3 * np.pi / 4) / (np.pi / 4)
+            sailing_efficiency = max(0.5, sailing_efficiency)
+        return sailing_efficiency
+
 @njit
 def calculate_new_velocity_numba(current_velocity, wind, direction, boat_performance, max_speed, inertia_factor):
     wind_norm = np.sqrt(wind[0]**2 + wind[1]**2)
@@ -414,8 +391,6 @@ def get_neighbors_numba(pos, velocity, acc, wind_grid, grid_size, boat_performan
 
     return neighbors
 
-from numba import cuda
-from math import acos, pi
 @cuda.jit
 def compute_heuristic_cuda(heuristic_table, wind_grid, goal, grid_x, grid_y):
     x, y = cuda.grid(2)
@@ -424,39 +399,5 @@ def compute_heuristic_cuda(heuristic_table, wind_grid, goal, grid_x, grid_y):
         pos1 = float(y)
         goal0 = float(goal[0])
         goal1 = float(goal[1])
-        dist = ((pos0 - goal0)**2 + (pos1 - goal1)**2) ** 1.2  # **1.2
-        wind0 = wind_grid[y, x, 0]
-        wind1 = wind_grid[y, x, 1]
-        wind_norm = (wind0**2 + wind1**2) ** 0.5
-        dir0 = goal0 - pos0
-        dir1 = goal1 - pos1
-        dir_norm = (dir0**2 + dir1**2) ** 0.5
-        if dir_norm > 1e-8:
-            dir0 /= dir_norm
-            dir1 /= dir_norm
-        else:
-            dir0 = 0.0
-            dir1 = 0.0
-        if wind_norm > 1e-8:
-            wind_dir0 = wind0 / wind_norm
-            wind_dir1 = wind1 / wind_norm
-        else:
-            wind_dir0 = 0.0
-            wind_dir1 = 0.0
-        wind_from0 = -wind_dir0
-        wind_from1 = -wind_dir1
-        dot = wind_from0 * dir0 + wind_from1 * dir1
-        dot = min(1.0, max(-1.0, dot))
-       
-        angle = acos(dot)
-        penalty = 1.0
-        if angle < pi/4:
-            penalty = 2.0
-        elif angle < pi/2:
-            penalty = 1.5 + 0.5 * (angle - pi/4) / (pi/4)
-        elif angle < 3*pi/4:
-            penalty = 1.0
-        else:
-            penalty = 1.0 - 0.5 * (angle - 3*pi/4) / (pi/4)
-            penalty = max(0.5, penalty)
-        heuristic_table[x, y] = dist 
+        dist = ((pos0 - goal0)**2 + (pos1 - goal1)**2) ** 1.2
+        heuristic_table[x, y] = dist
