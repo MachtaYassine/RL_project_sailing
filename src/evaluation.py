@@ -72,6 +72,7 @@ def evaluate_agent(
     # Evaluate on each seed
     iterator = seeds if not verbose else tqdm(seeds, desc="Evaluating seeds")
     for seed in iterator:
+        print(f"Evaluating seed: {seed}")
         # Reset environment and agent
         env.seed(seed)
         agent.seed(seed)
@@ -118,6 +119,7 @@ def evaluate_agent(
                 # Check if terminated due to success (reaching the goal) or timeout
                 # A successful episode yields a reward of 100 in the current implementation
                 episode_success = reward > 0 or (info.get('distance_to_goal', float('inf')) < 1.5)
+                print(f"Episode finished after {steps} steps with reward: {total_reward}, success: {episode_success}")
                 break
         
         # Store results
