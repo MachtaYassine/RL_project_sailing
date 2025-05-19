@@ -27,7 +27,6 @@ class DeterministicAgent2(BaseAgent):
         """
         super().__init__()
         self.np_random = np.random.default_rng()
-        # You must set these externally before calling act:
         self.grid_size = (32, 32)
         self.max_speed = 2.0
         self.wind_field = None
