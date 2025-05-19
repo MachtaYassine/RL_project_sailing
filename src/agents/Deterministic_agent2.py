@@ -144,80 +144,13 @@ class DeterministicAgent2(BaseAgent):
     def load(self, path: str) -> None:
         pass
 
-    def run_value_iteration(self, max_iters=1000, tol=1e-3):
-        """
-        Run value iteration to compute the optimal value function and policy for the grid.
-        Only considers position (x, y) as state for tractability.
-        """
-        grid_x, grid_y = self.grid_size
-        actions = np.array([
-            [0, 1], [1, 1], [1, 0], [1, -1],
-            [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 0]
-        ], dtype=np.int32)
-        n_actions = actions.shape[0]
-        value_table = np.full((grid_x, grid_y), 1e6, dtype=np.float32)
-        policy_table = np.zeros((grid_x, grid_y), dtype=np.int32)
-        goal = self.goal_position.astype(np.int32)
-        value_table[goal[0], goal[1]] = 0.0
-
-        wind_field = self.wind_field
-        boat_performance = 0.4
-        inertia_factor = 0.3
-        max_speed = self.max_speed
-
-        for it in range(max_iters):
-            delta = 0.0
-            new_value_table = value_table.copy()
-            for x in range(grid_x):
-                for y in range(grid_y):
-                    if (x, y) == (goal[0], goal[1]):
-                        continue
-                    min_cost = 1e6
-                    best_action = 8  # default to no-op
-                    for a_idx, action in enumerate(actions):
-                        pos = np.array([x, y], dtype=np.float32)
-                        wind = wind_field[y, x]
-                        # Assume zero velocity/acc for value iteration
-                        velocity = np.zeros(2, dtype=np.float32)
-                        acc = np.zeros(2, dtype=np.float32)
-                        new_velocity, wind_dir, sailing_eff = calculate_new_velocity_numba(
-                            velocity, wind, action.astype(np.float32), boat_performance, max_speed, inertia_factor
-                        )
-                        # Move to new position
-                        new_pos = pos + new_velocity
-                        new_pos = np.round(new_pos).astype(np.int32)
-                        new_pos = np.minimum(np.maximum(new_pos, np.array([0, 0], dtype=np.int32)), np.array([grid_x-1, grid_y-1], dtype=np.int32))
-                        cost = 1.0 + value_table[new_pos[0], new_pos[1]]
-                        # Penalize low sailing efficiency (no-go zone)
-                        if sailing_eff < 0.1:
-                            cost += 5.0
-                        if cost < min_cost:
-                            min_cost = cost
-                            best_action = a_idx
-                    new_value_table[x, y] = min_cost
-                    policy_table[x, y] = best_action
-                    delta = max(delta, abs(value_table[x, y] - min_cost))
-            value_table = new_value_table
-            if delta < tol:
-                break
-        self.value_table = value_table
-        self.policy_table = policy_table
+    
 
     def act(self, observation: np.ndarray) -> int:
         """
         Use the precomputed value iteration policy to select an action.
         """
-        # self.wind_field = observation[6:].reshape(self.grid_size[0], self.grid_size[1], 2)
-        # self.run_value_iteration()
-        # # print(f" ran value iteration")
-        # x, y = int(round(observation[0])), int(round(observation[1]))
-        # x = np.clip(x, 0, self.grid_size[0]-1)
-        # y = np.clip(y, 0, self.grid_size[1]-1)
-        # if hasattr(self, 'policy_table'):
-        #     # print(f" Using policy table")
-        #     return int(self.policy_table[x, y])
-        # else:
-        #     # print(f" Using A*")
+        
         return self.act_a_star(observation)
 
     def precompute_heuristic_table(self):
