@@ -4,6 +4,7 @@ import torch.optim as optim
 import os
 import sys
 import random
+import matplotlib.pyplot as plt
 sys.path.append("..")
 sys.path.append(".")
 
@@ -21,38 +22,58 @@ EPOCHS = 1000
 LEARNING_RATE = 1e-3
 MODEL_SAVE_PATH = "student_agent_bc.pth"
 EXPERT_DATA_PATH = "expert_data.npz"
-CHECK_EXPERT_SUCCESS_STRIDE = 50  # Print stats every X episodes
+CHECK_EXPERT_SUCCESS_STRIDE = 50  # Print stats every X epochs
 
-def validate_student(student, windfield_names, max_steps=200):
+TRAIN_WF = ["training_1", "training_2", "training_3", "training_4", "training_5"]
+VAL_WF = ["training_6", "training_7", "training_8"]
+
+def validate_student(student, windfield_names, max_steps=200, episodes_per_wf=10):
+    """
+    Evaluate the student agent on a set of windfields.
+
+    Returns:
+        success_rates: List of success rates per windfield (float in [0,1])
+        avg_steps: List of average steps per windfield (float)
+    """
     student.model.eval()
-    results = []
+    success_rates = []
+    avg_steps = []
+    avg_reward = []
     for windfield_name in windfield_names:
         windfield = INITIAL_WINDFIELDS[windfield_name]
-        env = SailingEnv(
-            wind_init_params=windfield['wind_init_params'],
-            wind_evol_params=windfield['wind_evol_params']
-        )
-        seed = random.randint(0, 100000)
-        obs, _ = env.reset(seed=seed)
-        student.reset()
-        steps = 0
-        success = False
-        for _ in range(max_steps):
-            action = student.act(obs)
-            obs, reward, done, truncated, info = env.step(action)
-            steps += 1
-            if done:
-                success = True
-                break
-            if truncated:
-                break
-        results.append((windfield_name, success, steps))
-    print("Validation results:")
-    for windfield_name, success, steps in results:
-        print(f"  {windfield_name}: {'Success' if success else 'Fail'} in {steps} steps")
+        successes = []
+        steps_list = []
+        rewards = []
+        for ep in range(episodes_per_wf):
+            env = SailingEnv(
+                wind_init_params=windfield['wind_init_params'],
+                wind_evol_params=windfield['wind_evol_params']
+            )
+            seed = random.randint(0, 100000)
+            obs, _ = env.reset(seed=seed)
+            student.reset()
+            steps = 0
+            success = False
+            for _ in range(max_steps):
+                action = student.act(obs)
+                obs, reward, done, truncated, info = env.step(action)
+                steps += 1
+                if done:
+                    success = True
+                    break
+                if truncated:
+                    break
+            successes.append(success)
+            steps_list.append(steps)
+            rewards.append(reward* 0.99 ** steps)
+        avg_reward.append(np.mean(rewards))
+        success_rate = np.mean(successes)
+        avg_step = np.mean(steps_list)
+        success_rates.append(success_rate)
+        avg_steps.append(avg_step)
     student.model.train()
+    return success_rates, avg_steps , avg_reward
 
-# --- Data Collection ---
 def collect_expert_data(agent, windfield, num_episodes, max_steps, check_expert_success_stride=CHECK_EXPERT_SUCCESS_STRIDE):
     X, y = [], []
     episode_success = []
@@ -68,7 +89,7 @@ def collect_expert_data(agent, windfield, num_episodes, max_steps, check_expert_
         success = False
         for _ in range(max_steps):
             action = agent.act(obs)
-            X.append(obs.copy())  # Use the full observation!
+            X.append(obs.copy())
             y.append(action)
             obs, reward, done, truncated, info = env.step(action)
             steps += 1
@@ -79,7 +100,6 @@ def collect_expert_data(agent, windfield, num_episodes, max_steps, check_expert_
                 break
         episode_success.append(success)
         episode_steps.append(steps)
-        # Print stats every check_expert_success_stride episodes
         if (ep + 1) % check_expert_success_stride == 0:
             recent_success = episode_success[-check_expert_success_stride:]
             recent_steps = episode_steps[-check_expert_success_stride:]
@@ -88,9 +108,8 @@ def collect_expert_data(agent, windfield, num_episodes, max_steps, check_expert_
             print(f"[Ep {ep+1}] Success rate: {success_rate:.1f}% | Avg steps: {avg_steps:.1f}")
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int64)
 
-# --- Main Training Script ---
 def main():
-    # 1. Load or collect expert data
+    # 1. Load or collect expert data (only for training windfields)
     if os.path.exists(EXPERT_DATA_PATH):
         print(f"Loading expert data from {EXPERT_DATA_PATH}")
         data = np.load(EXPERT_DATA_PATH)
@@ -99,7 +118,7 @@ def main():
     else:
         expert = DeterministicAgent2()
         all_X, all_y = [], []
-        for windfield_name in ["training_1", "training_2", "training_3", "training_4", "training_5", "training_6", "training_7", "training_8"]:
+        for windfield_name in TRAIN_WF:
             print(f"Collecting data for windfield: {windfield_name}")
             windfield = INITIAL_WINDFIELDS[windfield_name]
             X_part, y_part = collect_expert_data(
@@ -124,11 +143,18 @@ def main():
     optimizer = optim.Adam(student.model.parameters(), lr=LEARNING_RATE)
     criterion = torch.nn.CrossEntropyLoss()
 
-    # 4. Training loop
-    windfield_names = ["training_1", "training_2", "training_3", "training_4", "training_5", "training_6", "training_7", "training_8"]
+    # 4. Training loop with validation
+    plt.ion()
+    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+    train_losses = []
+    val_success_rates = []
+    val_avg_steps = []
+    val_rewards = []  # <-- initialize as list!
+    val_x = []
+
     for epoch in range(EPOCHS):
         total_loss = 0
-        for batch_X, batch_y in tqdm(dataloader):
+        for batch_X, batch_y in tqdm(dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}"):
             batch_X = batch_X.to(student.device)
             batch_y = batch_y.to(student.device)
             optimizer.zero_grad()
@@ -138,12 +164,55 @@ def main():
             optimizer.step()
             total_loss += loss.item() * batch_X.size(0)
         avg_loss = total_loss / len(dataset)
+        train_losses.append(avg_loss)
         print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {avg_loss:.4f}")
 
-        # Validation every 5 epochs
-        if (epoch + 1) % 5 == 0:
+        # Validation and live plotting every CHECK_EXPERT_SUCCESS_STRIDE epochs
+        if (epoch + 1) % CHECK_EXPERT_SUCCESS_STRIDE == 0:
             print(f"Validation after epoch {epoch+1}:")
-            validate_student(student, windfield_names, max_steps=MAX_STEPS_PER_EPISODE)
+            val_rates, val_steps, val_rewards_epoch = validate_student(
+                student, VAL_WF, max_steps=MAX_STEPS_PER_EPISODE, episodes_per_wf=10
+            )
+            mean_val_rate = np.mean(val_rates)
+            mean_val_steps = np.mean(val_steps)
+            mean_val_reward = np.mean(val_rewards_epoch)
+            val_success_rates.append(mean_val_rate)
+            val_avg_steps.append(mean_val_steps)
+            val_rewards.append(mean_val_reward)
+            val_x.append(epoch + 1)
+            print(f"Validation success rates (windfields 6-8): {val_rates}, mean: {mean_val_rate:.2f}")
+            print(f"Validation avg steps (windfields 6-8): {val_steps}, mean: {mean_val_steps:.2f}")
+
+            # --- Live Plotting ---
+            axs[0].cla()
+            axs[0].plot(train_losses, label="Train Loss")
+            axs[0].set_xlabel("Epoch")
+            axs[0].set_ylabel("Loss")
+            axs[0].set_title("Training Loss")
+            axs[0].legend()
+
+            axs[1].cla()
+            axs[1].plot(val_x, val_success_rates, marker='o', label="Validation Success Rate")
+            axs[1].set_xlabel("Epoch")
+            axs[1].set_ylabel("Success Rate")
+            axs[1].set_title("Validation Success Rate (Windfields 6-8)")
+            axs[1].set_ylim(0, 1.05)
+            axs[1].legend()
+
+            axs[2].cla()
+            axs[2].plot(val_x, val_avg_steps, marker='o', label="Validation Avg Steps")
+            axs[2].set_xlabel("Epoch")
+            axs[2].set_ylabel("Avg Steps")
+            axs[2].set_title("Validation Avg Steps (Windfields 6-8)")
+            axs[2].legend()
+
+            plt.tight_layout()
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+            plt.pause(0.01)
+
+    plt.ioff()
+    plt.show()
 
     # 5. Save the trained model
     student.save(MODEL_SAVE_PATH)
@@ -151,3 +220,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print('\a')
