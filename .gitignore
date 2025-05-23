@@ -49,3 +49,6 @@ ENV/
 
 # Exclude files in agent directory ending with a number
 agent/*[0-9].py private_notebooks/
+
+
+*.npz

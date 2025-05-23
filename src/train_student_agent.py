@@ -8,11 +8,15 @@ import matplotlib.pyplot as plt
 sys.path.append("..")
 sys.path.append(".")
 
-from agents.Student_agent import StudentAgent
+from src.agents.Student_agent import StudentAgent
 from agents.Deterministic_agent2 import DeterministicAgent2
 from env_sailing import SailingEnv
 from initial_windfields import INITIAL_WINDFIELDS
 from tqdm import tqdm
+
+# Add import for windfield sampling
+from src.initial_windfields.sample_windfields import sample_windfield
+
 
 # --- Hyperparameters ---
 NUM_EPISODES_PER_WINDFIELD = 100
@@ -74,42 +78,55 @@ def validate_student(student, windfield_names, max_steps=200, episodes_per_wf=10
     student.model.train()
     return success_rates, avg_steps , avg_reward
 
-def collect_expert_data(agent, windfield, num_episodes, max_steps, check_expert_success_stride=CHECK_EXPERT_SUCCESS_STRIDE):
+def collect_expert_data_sampled(agent, num_windfields, seeds_per_wf, max_steps, check_expert_success_stride=CHECK_EXPERT_SUCCESS_STRIDE):
+    """
+    Collect expert data using randomly sampled windfields.
+    For each windfield, run seeds_per_wf episodes with different random seeds.
+    Prints stats for each sampled windfield (across the number of seeds).
+    """
     X, y = [], []
-    episode_success = []
-    episode_steps = []
-    for ep in tqdm(range(num_episodes), desc="Collecting expert data"):
-        env = SailingEnv(
-            wind_init_params=windfield['wind_init_params'],
-            wind_evol_params=windfield['wind_evol_params']
-        )
-        obs, _ = env.reset(seed=ep)
-        agent.reset()
-        steps = 0
-        success = False
-        for _ in range(max_steps):
-            action = agent.act(obs)
-            X.append(obs.copy())
-            y.append(action)
-            obs, reward, done, truncated, info = env.step(action)
-            steps += 1
-            if done:
-                success = True
-                break
-            if truncated:
-                break
-        episode_success.append(success)
-        episode_steps.append(steps)
-        if (ep + 1) % check_expert_success_stride == 0:
-            recent_success = episode_success[-check_expert_success_stride:]
-            recent_steps = episode_steps[-check_expert_success_stride:]
-            success_rate = 100.0 * np.mean(recent_success)
-            avg_steps = np.mean(recent_steps)
-            print(f"[Ep {ep+1}] Success rate: {success_rate:.1f}% | Avg steps: {avg_steps:.1f}")
+    for wf_idx in range(num_windfields):
+        windfield = sample_windfield()
+        wf_success = []
+        wf_steps = []
+        wf_rewards = []
+        for seed in range(seeds_per_wf):
+            env = SailingEnv(
+                wind_init_params=windfield['wind_init_params'],
+                wind_evol_params=windfield['wind_evol_params']
+            )
+            obs, _ = env.reset(seed=seed)
+            agent.reset()
+            steps = 0
+            success = False
+            for _ in range(max_steps):
+                action = agent.act(obs)
+                X.append(obs.copy())
+                y.append(action)
+                obs, reward, done, truncated, info = env.step(action)
+                steps += 1
+                if done:
+                    success = True
+                    break
+                if truncated:
+                    break
+            wf_success.append(success)
+            wf_steps.append(steps)
+            wf_rewards.append(reward * 0.99 ** steps)
+        # Print stats for this windfield
+        success_rate = 100.0 * np.mean(wf_success)
+        avg_steps = np.mean(wf_steps)
+        avg_reward = np.mean(wf_rewards)
+        print(f"[Windfield {wf_idx+1}/{num_windfields}] Success rate: {success_rate:.1f}% | Avg steps: {avg_steps:.1f} | Avg reward: {avg_reward:.2f}")
+        if avg_reward < 55:
+            print(f" windfield init parameters: {windfield['wind_init_params']} \n windfield evol params: {windfield['wind_evol_params']}")
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int64)
+
+
 
 def main():
     # 1. Load or collect expert data (only for training windfields)
+    # 1. Load or collect expert data (using sampled windfields)
     if os.path.exists(EXPERT_DATA_PATH):
         print(f"Loading expert data from {EXPERT_DATA_PATH}")
         data = np.load(EXPERT_DATA_PATH)
@@ -117,18 +134,11 @@ def main():
         y = data["y"]
     else:
         expert = DeterministicAgent2()
-        all_X, all_y = [], []
-        for windfield_name in TRAIN_WF:
-            print(f"Collecting data for windfield: {windfield_name}")
-            windfield = INITIAL_WINDFIELDS[windfield_name]
-            X_part, y_part = collect_expert_data(
-                expert, windfield, NUM_EPISODES_PER_WINDFIELD, MAX_STEPS_PER_EPISODE,
-                check_expert_success_stride=CHECK_EXPERT_SUCCESS_STRIDE
-            )
-            all_X.append(X_part)
-            all_y.append(y_part)
-        X = np.concatenate(all_X, axis=0)
-        y = np.concatenate(all_y, axis=0)
+        # Use 500 windfields, 5 seeds each, 100 steps max (as per your requirements)
+        X, y = collect_expert_data_sampled(
+            expert, num_windfields=500, seeds_per_wf=5, max_steps=100,
+            check_expert_success_stride=CHECK_EXPERT_SUCCESS_STRIDE
+        )
         print(f"Total samples collected: {X.shape[0]}")
         np.savez(EXPERT_DATA_PATH, X=X, y=y)
         print(f"Expert data saved to {EXPERT_DATA_PATH}")

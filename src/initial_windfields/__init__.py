@@ -174,6 +174,53 @@ INITIAL_WINDFIELDS['training_6'] = TRAINING_INITIAL_WINDFIELD_6
 INITIAL_WINDFIELDS['training_7'] = TRAINING_INITIAL_WINDFIELD_7
 INITIAL_WINDFIELDS['training_8'] = TRAINING_INITIAL_WINDFIELD_8
 
+
+TRAINING_INITIAL_WINDFIELD_9 = {
+    'wind_init_params': {
+        'base_speed': 2.7636020325115305,
+        'base_direction': (-0.7469957845364154, -0.6648287733580921),
+        'pattern_scale': 96,
+        'pattern_strength': 0.44203974562364523,
+        'strength_variation': 0.5560843053464679,
+        'noise': 0.20507999960906076
+    },
+    'wind_evol_params': {
+        'wind_change_prob': 0.2518034371545119,
+        'pattern_scale': 96,
+        'perturbation_angle_amplitude': 0.12252577654576956,
+        'perturbation_strength_amplitude': 0.10471972720294001,
+        'rotation_bias': 0.11151347597188604,
+        'bias_strength': 0.30490250175989764
+    }
+}
+
+# Register windfield 9 in the windfield dictionary
+INITIAL_WINDFIELDS['training_9'] = TRAINING_INITIAL_WINDFIELD_9
+
+
+
+TRAINING_INITIAL_WINDFIELD_10 = {
+    'wind_init_params': {
+        'base_speed': 2.209668307587709,
+        'base_direction': (-0.6794475424145662, -0.733724087860557),
+        'pattern_scale': 128,
+        'pattern_strength': 0.37921354631495197,
+        'strength_variation': 0.1727002277611032,
+        'noise': 0.2833472879339608
+    },
+    'wind_evol_params': {
+        'wind_change_prob': 0.049713847376946396,
+        'pattern_scale': 32,
+        'perturbation_angle_amplitude': 0.13960272221178285,
+        'perturbation_strength_amplitude': 0.10149349991077161,
+        'rotation_bias': -0.08328800426249838,
+        'bias_strength': 0.11361121249510664
+    }
+}
+
+# Register windfield 10 in the windfield dictionary
+INITIAL_WINDFIELDS['training_10'] = TRAINING_INITIAL_WINDFIELD_10
+
 def get_initial_windfield(name):
     """
     Get the parameters for a specific initial windfield.

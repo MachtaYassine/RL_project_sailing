@@ -74,7 +74,7 @@ class DeterministicAgent2(BaseAgent):
             self.grid_size,
             self.goal_position,
             self.max_speed,
-            max_iterations=10000,
+            max_iterations=15000,
             heuristic_table=self.heuristic_table if hasattr(self, 'heuristic_table') else None
         )
 
@@ -96,6 +96,7 @@ class DeterministicAgent2(BaseAgent):
         Returns:
             int: The action index to take.
         """
+        print("A* failed, using greedy fallback.")
         x, y = observation[0], observation[1]
         wx, wy = observation[4], observation[5]
         current_pos = np.array([x, y])
