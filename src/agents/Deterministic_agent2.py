@@ -1,10 +1,16 @@
 import numpy as np
 from agents.base_agent import BaseAgent
-from numba import njit
+from numba import njit, cuda, float32
 import time
 from numba import cuda
 from math import acos, pi
+import math 
 from typing import Optional, Tuple, List, Dict, Any
+
+ACTIONS = np.array([
+    [0, 1], [1, 1], [1, 0], [1, -1],
+    [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 0]
+], dtype=np.int32)
 
 class DeterministicAgent2(BaseAgent):
     """
@@ -65,6 +71,15 @@ class DeterministicAgent2(BaseAgent):
             self.grid_size[1]
         )
         self.heuristic_table = heuristic_table_device.copy_to_host()
+        
+        # import matplotlib.pyplot as plt
+        # plt.imshow(self.heuristic_table.T, cmap='hot', interpolation='nearest')
+        # plt.colorbar()
+        # plt.title("Heuristic Table Heatmap")
+        # plt.xlabel("X Position")
+        # plt.ylabel("Y Position")
+        # plt.show()
+        # plt.close()
 
         path = self.sailing_a_star_action(
             self.position,
@@ -260,6 +275,8 @@ class DeterministicAgent2(BaseAgent):
                 max_speed,
                 inertia_factor
             )
+            
+            
             visited.add((current, tuple(np.round(velocity, 2)), tuple(np.round(acc, 2))))
 
             for i in range(neighbors.shape[0]):
@@ -399,5 +416,133 @@ def compute_heuristic_cuda(heuristic_table, wind_grid, goal, grid_x, grid_y):
         pos1 = float(y)
         goal0 = float(goal[0])
         goal1 = float(goal[1])
-        dist = ((pos0 - goal0)**2 + (pos1 - goal1)**2) ** 1.2
-        heuristic_table[x, y] = dist
+        dx = goal0 - pos0
+        dy = goal1 - pos1
+        dist = math.sqrt(dx * dx + dy * dy)**1.15
+
+        # Wind at this cell
+        wind_x = wind_grid[x, y, 0]
+        wind_y = wind_grid[x, y, 1]
+        wind_norm = math.sqrt(wind_x * wind_x + wind_y * wind_y)
+        if wind_norm > 1e-6:
+            wind_dir_x = wind_x / wind_norm
+            wind_dir_y = wind_y / wind_norm
+        else:
+            wind_dir_x = 0.0
+            wind_dir_y = 0.0
+
+        # Direction to goal (normalized)
+        to_goal_norm = dist
+        if to_goal_norm > 1e-6:
+            to_goal_dir_x = dx / to_goal_norm
+            to_goal_dir_y = dy / to_goal_norm
+        else:
+            to_goal_dir_x = 0.0
+            to_goal_dir_y = 0.0
+
+        # Calculate sailing efficiency (same logic as in agent)
+        wind_from_x = -wind_dir_x
+        wind_from_y = -wind_dir_y
+        dot = wind_from_x * to_goal_dir_x + wind_from_y * to_goal_dir_y
+        dot = min(1.0, max(-1.0, dot))  # Clamp dot to [-1, 1]
+        wind_angle = math.acos(dot)
+        if wind_angle < math.pi / 4:
+            sailing_efficiency = 0.05
+        elif wind_angle < math.pi / 2:
+            sailing_efficiency = 0.5 + 0.5 * (wind_angle - math.pi / 4) / (math.pi / 4)
+        elif wind_angle < 3 * math.pi / 4:
+            sailing_efficiency = 1.0
+        else:
+            sailing_efficiency = 1.0 - 0.5 * (wind_angle - 3 * math.pi / 4) / (math.pi / 4)
+
+        # Penalize heuristic by efficiency (lower efficiency = higher cost)
+        heuristic = dist / max(sailing_efficiency, 0.1)
+        heuristic_table[x, y] = heuristic
+        
+        
+        
+import math
+
+@cuda.jit
+def get_neighbors_cuda(pos, velocity, acc, wind_grid, grid_size, boat_performance, max_speed, inertia_factor, neighbors, actions):
+    i = cuda.threadIdx.x
+    n_actions = actions.shape[0]
+    if i < n_actions:
+        direction = cuda.local.array(2, float32)
+        direction[0] = float(actions[i, 0])
+        direction[1] = float(actions[i, 1])
+
+        x = min(max(int(pos[0]), 0), grid_size[0]-1)
+        y = min(max(int(pos[1]), 0), grid_size[1]-1)
+
+        wind_x = wind_grid[y, x, 0]
+        wind_y = wind_grid[y, x, 1]
+        wind_norm = math.sqrt(wind_x * wind_x + wind_y * wind_y)
+        wind_normalized_x = 0.0
+        wind_normalized_y = 0.0
+        sailing_efficiency = 0.0
+
+        if wind_norm > 1e-6:
+            wind_normalized_x = wind_x / wind_norm
+            wind_normalized_y = wind_y / wind_norm
+
+            direction_norm = math.sqrt(direction[0]**2 + direction[1]**2)
+            if direction_norm < 1e-10:
+                direction_normalized_x = 1.0
+                direction_normalized_y = 0.0
+            else:
+                direction_normalized_x = direction[0] / direction_norm
+                direction_normalized_y = direction[1] / direction_norm
+
+            dot = direction_normalized_x * -wind_normalized_x + direction_normalized_y * -wind_normalized_y
+            dot = min(1.0, max(-1.0, dot))
+            angle = math.acos(dot)
+
+            if angle < math.pi / 4:
+                sailing_efficiency = 0.05
+            elif angle < math.pi / 2:
+                sailing_efficiency = 0.5 + 0.5 * (angle - math.pi / 4) / (math.pi / 4)
+            elif angle < 3 * math.pi / 4:
+                sailing_efficiency = 1.0
+            else:
+                sailing_efficiency = max(0.5, 1.0 - 0.5 * (angle - 3 * math.pi / 4) / (math.pi / 4))
+
+            theoretical_velocity_x = direction[0] * sailing_efficiency * wind_norm * boat_performance
+            theoretical_velocity_y = direction[1] * sailing_efficiency * wind_norm * boat_performance
+            speed = math.sqrt(theoretical_velocity_x**2 + theoretical_velocity_y**2)
+            if speed > max_speed:
+                theoretical_velocity_x = theoretical_velocity_x / speed * max_speed
+                theoretical_velocity_y = theoretical_velocity_y / speed * max_speed
+
+            new_velocity_x = theoretical_velocity_x + inertia_factor * (velocity[0] - theoretical_velocity_x)
+            new_velocity_y = theoretical_velocity_y + inertia_factor * (velocity[1] - theoretical_velocity_y)
+            speed = math.sqrt(new_velocity_x**2 + new_velocity_y**2)
+            if speed > max_speed:
+                new_velocity_x = new_velocity_x / speed * max_speed
+                new_velocity_y = new_velocity_y / speed * max_speed
+        else:
+            new_velocity_x = inertia_factor * velocity[0]
+            new_velocity_y = inertia_factor * velocity[1]
+
+        new_acc_x = acc[0] + new_velocity_x
+        new_acc_y = acc[1] + new_velocity_y
+        new_position_float_x = pos[0] + new_acc_x
+        new_position_float_y = pos[1] + new_acc_y
+        new_position_x = int(round(new_position_float_x))
+        new_position_y = int(round(new_position_float_y))
+        new_acc2_x = new_position_float_x - float(new_position_x)
+        new_acc2_y = new_position_float_y - float(new_position_y)
+        new_position_x = min(max(new_position_x, 0), grid_size[0] - 1)
+        new_position_y = min(max(new_position_y, 0), grid_size[1] - 1)
+
+        neighbors[i, 0] = float(new_position_x)
+        neighbors[i, 1] = float(new_position_y)
+        neighbors[i, 2] = new_velocity_x
+        neighbors[i, 3] = new_velocity_y
+        neighbors[i, 4] = new_acc2_x
+        neighbors[i, 5] = new_acc2_y
+        neighbors[i, 6] = direction[0]
+        neighbors[i, 7] = direction[1]
+        neighbors[i, 8] = wind_normalized_x
+        neighbors[i, 9] = wind_normalized_y
+        neighbors[i, 10] = sailing_efficiency
