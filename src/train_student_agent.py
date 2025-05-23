@@ -118,8 +118,8 @@ def collect_expert_data_sampled(agent, num_windfields, seeds_per_wf, max_steps, 
         avg_steps = np.mean(wf_steps)
         avg_reward = np.mean(wf_rewards)
         print(f"[Windfield {wf_idx+1}/{num_windfields}] Success rate: {success_rate:.1f}% | Avg steps: {avg_steps:.1f} | Avg reward: {avg_reward:.2f}")
-        if avg_reward < 55:
-            print(f" windfield init parameters: {windfield['wind_init_params']} \n windfield evol params: {windfield['wind_evol_params']}")
+        # if avg_reward < 55:
+            # print(f" windfield init parameters: {windfield['wind_init_params']} \n windfield evol params: {windfield['wind_evol_params']}")
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int64)
 
 
