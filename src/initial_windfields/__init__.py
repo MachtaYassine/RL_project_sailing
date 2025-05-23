@@ -221,6 +221,16 @@ TRAINING_INITIAL_WINDFIELD_10 = {
 # Register windfield 10 in the windfield dictionary
 INITIAL_WINDFIELDS['training_10'] = TRAINING_INITIAL_WINDFIELD_10
 
+
+TRAINING_INITIAL_WINDFIELD_69 = {
+    'wind_init_params': {'base_speed': 2.0807439078132526, 'base_direction': (-0.1715617692654716, -0.9851733651122025), 'pattern_scale': 96, 'pattern_strength': 0.3763618283505674, 'strength_variation': 0.3957833186524863, 'noise': 0.2694177902805369},
+    'wind_evol_params': {'wind_change_prob': 0.0004478615434269084, 'pattern_scale': 96, 'perturbation_angle_amplitude': 0.11860443642596918, 'perturbation_strength_amplitude': 0.11846540304272153, 'rotation_bias': 0.11277140558059184, 'bias_strength': 0.04065982802711987}
+}
+
+INITIAL_WINDFIELDS['training_69'] = TRAINING_INITIAL_WINDFIELD_69
+
+
+
 def get_initial_windfield(name):
     """
     Get the parameters for a specific initial windfield.
