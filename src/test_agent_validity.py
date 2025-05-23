@@ -226,7 +226,7 @@ def test_agent_actions(agent_instance: BaseAgent) -> List[str]:
                 line_info = ""
             issues.append(f"Error during agent action: {str(e)}{line_info}\nTraceback:\n{tb}")
             break
-            break
+
     
     return issues
 
