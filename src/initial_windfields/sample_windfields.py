@@ -28,6 +28,30 @@ def sample_windfield():
         'wind_init_params': wind_init_params,
         'wind_evol_params': wind_evol_params
     }
+    
+    
+def sample_windfield2():
+    """Sample a random windfield configuration, including evolution parameters."""
+    wind_init_params = {
+        'base_speed': float(np.random.uniform(1.5, 5.0)),  # wider range
+        'base_direction': random_unit_vector(),
+        'pattern_scale': int(np.random.choice([8, 16, 32, 64, 96, 128, 192])),  # more options
+        'pattern_strength': float(np.random.uniform(0.05, 1.0)),  # wider range
+        'strength_variation': float(np.random.uniform(0.05, 0.8)),  # wider range
+        'noise': float(np.random.uniform(0.01, 0.5))  # wider range
+    }
+    wind_evol_params = {
+        'wind_change_prob': float(np.random.uniform(0.0, 1.0)),
+        'pattern_scale': int(np.random.choice([8, 16, 32, 64, 96, 128, 192])),
+        'perturbation_angle_amplitude': float(np.random.uniform(0.0, 0.4)),  # wider range
+        'perturbation_strength_amplitude': float(np.random.uniform(0.0, 0.4)),  # wider range
+        'rotation_bias': float(np.random.uniform(-0.4, 0.4)),  # wider range
+        'bias_strength': float(np.random.uniform(0.0, 1.5))  # wider range
+    }
+    return {
+        'wind_init_params': wind_init_params,
+        'wind_evol_params': wind_evol_params
+    }
 
 def windfield_hash(windfield):
     """Hash a windfield for uniqueness (rounded for floating point stability)."""

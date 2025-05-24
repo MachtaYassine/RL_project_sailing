@@ -418,7 +418,7 @@ def compute_heuristic_cuda(heuristic_table, wind_grid, goal, grid_x, grid_y):
         goal1 = float(goal[1])
         dx = goal0 - pos0
         dy = goal1 - pos1
-        dist = math.sqrt(dx * dx + dy * dy)**1.15
+        dist = math.sqrt(dx * dx + dy * dy)**1.2
 
         # Wind at this cell
         wind_x = wind_grid[x, y, 0]

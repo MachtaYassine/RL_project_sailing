@@ -11,6 +11,7 @@ class StudentAgent(BaseAgent):
         self.np_random = np.random.default_rng()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self._build_model().to(self.device)
+        self.step = 0
         print("Loading model...")
         # self.load('student_agent_bc.pth')
 
@@ -58,19 +59,23 @@ class StudentAgent(BaseAgent):
 
         return DualHeadNet()
 
-    def act(self, observation: np.ndarray, wind_params: np.ndarray = None, step: int = 0) -> int:
+    def act(self, observation: np.ndarray) -> int:
         """
-        Select an action based on the current observation, wind parameters, and step.
+        Select an action based on the current observation only (inference mode).
+        Uses predicted wind parameters and the agent's internal step.
         """
+        self.model.eval() 
         with torch.no_grad():
             obs_tensor = torch.tensor(observation, dtype=torch.float32).to(self.device)
-            if wind_params is not None:
-                wind_tensor = torch.tensor(wind_params, dtype=torch.float32).to(self.device)
-            else:
-                wind_tensor = None
-            step_tensor = torch.tensor([step], dtype=torch.float32).to(self.device)
-            action_logits, _ = self.model(obs_tensor, wind_tensor, step_tensor)
+            # Predict wind params from obs
+            x = self.model.obs_encoder(obs_tensor)
+            pred_wind = self.model.wind_head(x)
+            step_tensor = torch.tensor([self.step], dtype=torch.float32).to(self.device)
+            # Concatenate for action head
+            action_in = torch.cat([x, pred_wind, step_tensor], dim=0)
+            action_logits = self.model.action_head(action_in)
             action = torch.argmax(action_logits).item()
+        self.step += 1
         return action
 
     def predict_wind_params(self, observation: np.ndarray) -> np.ndarray:
@@ -97,3 +102,9 @@ class StudentAgent(BaseAgent):
         self.model.to(self.device)
         self.model.eval()
         print(f"Model loaded from {path}")
+        
+    def reset(self):
+        """
+        Reset the agent's internal state.
+        """
+        self.step = 0

@@ -9,26 +9,27 @@ sys.path.append("..")
 sys.path.append(".")
 
 from src.agents.Student_agent import StudentAgent
+from src.agents.Combined_Agent import CombinedStudentAgent
 from agents.Deterministic_agent2 import DeterministicAgent2
 from env_sailing import SailingEnv
 from initial_windfields import INITIAL_WINDFIELDS
 from tqdm import tqdm
 
 # Add import for windfield sampling
-from src.initial_windfields.sample_windfields import sample_windfield
+from src.initial_windfields.sample_windfields import sample_windfield,sample_windfield2
 
 
 # --- Hyperparameters ---
 NUM_EPISODES_PER_WINDFIELD = 100
 MAX_STEPS_PER_EPISODE = 120
-BATCH_SIZE = 2048
-EPOCHS = 1000
+BATCH_SIZE = 8192
+EPOCHS = 300
 LEARNING_RATE = 1e-3
-MODEL_SAVE_PATH = "/scratch/ymachta/student_agent_bc.pth"
+MODEL_SAVE_PATH = "/scratch/ymachta/comb_student_agent_bc.pth"
 EXPERT_DATA_PATH = "/scratch/ymachta/expert_data.npz"
 PLOTS_SAVE_DIR = "/scratch/ymachta/training_plots"
 os.makedirs(PLOTS_SAVE_DIR, exist_ok=True)
-CHECK_EXPERT_SUCCESS_STRIDE = 50  # Print stats every X epochs
+CHECK_EXPERT_SUCCESS_STRIDE =25  # Print stats every X epochs
 
 # TRAIN_WF = ["training_1", "training_2", "training_3", "training_4", "training_5"]
 VAL_WF = ["training_1", "training_2", "training_3"]
@@ -77,7 +78,6 @@ def validate_student(student, windfield_names, max_steps=200, episodes_per_wf=10
         avg_step = np.mean(steps_list)
         success_rates.append(success_rate)
         avg_steps.append(avg_step)
-    student.model.train()
     return success_rates, avg_steps , avg_reward
 
 def save_problematic_windfield(windfield, idx, filename="problematic_windfields.py"):
@@ -177,7 +177,7 @@ def main():
         expert = DeterministicAgent2()
         # Use 500 windfields, 5 seeds each, 100 steps max (as per your requirements)
         X, y = collect_expert_data_sampled(
-            expert, num_windfields=1000, seeds_per_wf=5, max_steps=150,
+            expert, num_windfields=600, seeds_per_wf=5, max_steps=150,
             check_expert_success_stride=CHECK_EXPERT_SUCCESS_STRIDE
         )
         print(f"Total samples collected: {X.shape[0]}")
@@ -189,14 +189,14 @@ def main():
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     # 3. Initialize StudentAgent and optimizer
-    student = StudentAgent()
+    student = CombinedStudentAgent()
     student.model.train()
     optimizer = optim.Adam(student.model.parameters(), lr=LEARNING_RATE)
     criterion = torch.nn.CrossEntropyLoss()
 
     # 4. Training loop with validation
     plt.ion()
-    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axs = plt.subplots(2, 2, figsize=(18, 5))
     train_losses = []
     val_success_rates = []
     val_avg_steps = []
@@ -212,6 +212,7 @@ def main():
     for epoch in range(EPOCHS):
         total_loss = 0
         for batch_X, batch_y in tqdm(dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}"):
+            student.model.train()  # Ensure model is in training mode
             batch_X = batch_X.to(student.device)
             batch_y = batch_y.to(student.device)
             # Split input
@@ -233,6 +234,7 @@ def main():
         train_losses.append(avg_loss)
         print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {avg_loss:.4f}")
 
+        student.model.eval()  # Set model to evaluation mode for validation
         # Validation and live plotting every CHECK_EXPERT_SUCCESS_STRIDE epochs
         if (epoch + 1) % CHECK_EXPERT_SUCCESS_STRIDE == 0:
             print(f"Wind parameter loss accross current batch: {loss_wind.item()}")
@@ -255,7 +257,7 @@ def main():
             # --- Validation on randomized windfields ---
             rand_successes, rand_steps, rand_rewards = [], [], []
             for _ in range(3):  # e.g., validate on 3 random windfields
-                windfield = sample_windfield()
+                windfield = sample_windfield2()
                 successes, steps_list, rewards = [], [], []
                 for ep in range(5):  # e.g., 5 episodes per random windfield
                     env = SailingEnv(
@@ -338,45 +340,41 @@ def main():
             print(f"Validation on randomized windfields: Success {mean_rand_success:.2f}, Steps {mean_rand_steps:.1f}, Reward {mean_rand_reward:.2f}")
 
             # --- Live Plotting ---
-            axs[0].cla()
-            axs[0].plot(train_losses, label="Train Loss")
-            axs[0].set_xlabel("Epoch")
-            axs[0].set_ylabel("Loss")
-            axs[0].set_title("Training Loss")
-            axs[0].legend()
+            axs[0, 0].cla()
+            axs[0, 0].plot(train_losses, label="Train Loss")
+            axs[0, 0].set_xlabel("Epoch")
+            axs[0, 0].set_ylabel("Loss")
+            axs[0, 0].set_title("Training Loss")
+            axs[0, 0].legend()
 
-            axs[1].cla()
-            axs[1].plot(val_x, val_success_rates, marker='o', label="Fixed WF Success Rate")
-            axs[1].plot(val_x, rand_val_success_rates, marker='x', label="Random WF Success Rate")
-            axs[1].set_xlabel("Epoch")
-            axs[1].set_ylabel("Success Rate")
-            axs[1].set_title("Validation Success Rate")
-            axs[1].set_ylim(0, 1.05)
-            axs[1].legend()
+            axs[0, 1].cla()
+            axs[0, 1].plot(val_x, val_success_rates, marker='o', label="Fixed WF Success Rate")
+            axs[0, 1].plot(val_x, rand_val_success_rates, marker='x', label="Random WF Success Rate")
+            axs[0, 1].set_xlabel("Epoch")
+            axs[0, 1].set_ylabel("Success Rate")
+            axs[0, 1].set_title("Validation Success Rate")
+            axs[0, 1].set_ylim(0, 1.05)
+            axs[0, 1].legend()
 
-            axs[2].cla()
-            axs[2].plot(val_x, val_avg_steps, marker='o', label="Fixed WF Avg Steps")
-            axs[2].plot(val_x, rand_val_avg_steps, marker='x', label="Random WF Avg Steps")
-            axs[2].set_xlabel("Epoch")
-            axs[2].set_ylabel("Avg Steps")
-            axs[2].set_title("Validation Avg Steps")
-            axs[2].legend()
+            axs[1, 0].cla()
+            axs[1, 0].plot(val_x, val_avg_steps, marker='o', label="Fixed WF Avg Steps")
+            axs[1, 0].plot(val_x, rand_val_avg_steps, marker='x', label="Random WF Avg Steps")
+            axs[1, 0].set_xlabel("Epoch")
+            axs[1, 0].set_ylabel("Avg Steps")
+            axs[1, 0].set_title("Validation Avg Steps")
+            axs[1, 0].legend()
+
+            axs[1, 1].cla()
+            axs[1, 1].plot(val_x, val_rewards, marker='o', label="Fixed WF Reward")
+            axs[1, 1].plot(val_x, rand_val_rewards, marker='x', label="Random WF Reward")
+            axs[1, 1].set_xlabel("Epoch")
+            axs[1, 1].set_ylabel("Reward")
+            axs[1, 1].set_title("Validation Reward")
+            axs[1, 1].legend()
 
             plt.tight_layout()
             fig.savefig(os.path.join(PLOTS_SAVE_DIR, f"training_progress_epoch_{epoch+1}.png"))
-
-            # Save rewards plot
-            plt.figure("Validation Rewards")
-            plt.clf()
-            plt.plot(val_x, val_rewards, marker='o', label="Fixed WF Reward")
-            plt.plot(val_x, rand_val_rewards, marker='x', label="Random WF Reward")
-            plt.xlabel("Epoch")
-            plt.ylabel("Reward")
-            plt.title("Validation Reward")
-            plt.legend()
-            plt.savefig(os.path.join(PLOTS_SAVE_DIR, f"validation_rewards_epoch_{epoch+1}.png"))
-            plt.close("Validation Rewards")
-            
+                
     # 5. Save the trained model
     student.save(MODEL_SAVE_PATH)
     print(f"Model saved to {MODEL_SAVE_PATH}")
