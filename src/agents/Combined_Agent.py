@@ -64,8 +64,12 @@ class CombinedStudentAgent(BaseAgent):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self._build_model().to(self.device)
         
-        self.load('/scratch/ymachta/comb_student_agent_bc.pth')  # Load pre-trained weights
+        weights_path = os.path.join(os.path.dirname(__file__), "comb_student_agent_bc.pth")
+        self.load(weights_path)
+        
         self.step = 0
+        self.mode='eval'
+        self.rl= False  # Set to True for RL training mode, False for inference
 
     def _build_model(self):
         class CombinedDualHeadNet(nn.Module):

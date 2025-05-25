@@ -6,6 +6,9 @@ from numba import cuda
 from math import acos, pi
 import math 
 from typing import Optional, Tuple, List, Dict, Any
+import matplotlib.pyplot as plt
+from matplotlib import animation
+from matplotlib.widgets import Slider
 
 ACTIONS = np.array([
     [0, 1], [1, 1], [1, 0], [1, -1],
@@ -41,6 +44,7 @@ class DeterministicAgent2(BaseAgent):
         self.velocity = np.zeros(2, dtype=np.float32)
         self.position = np.zeros(2, dtype=np.float32)
         self.heuristic_table = np.zeros((self.grid_size[0], self.grid_size[1]), dtype=np.float32)
+        self.emergency_actions = None
 
     def act_a_star(self, observation: np.ndarray) -> int:
         """
@@ -50,38 +54,34 @@ class DeterministicAgent2(BaseAgent):
         Returns:
             int: The action index to take.
         """
+        self.heuristic_table = np.zeros((self.grid_size[0], self.grid_size[1]), dtype=np.float32)
         self.position = observation[:2]
         self.velocity = observation[2:4]
         wind_field_flat = observation[6:]
         self.wind_field = wind_field_flat.reshape(self.grid_size[0], self.grid_size[1], 2)
 
-        # Precompute heuristic table if not already done
-        threadsperblock = (16, 16)
-        blockspergrid_x = int(np.ceil(self.grid_size[0] / threadsperblock[0]))
-        blockspergrid_y = int(np.ceil(self.grid_size[1] / threadsperblock[1]))
+        # # # Precompute heuristic table if not already done
+        # threadsperblock = (16, 16)
+        # blockspergrid_x = int(np.ceil(self.grid_size[0] / threadsperblock[0]))
+        # blockspergrid_y = int(np.ceil(self.grid_size[1] / threadsperblock[1]))
 
-        heuristic_table_device = cuda.to_device(self.heuristic_table)
-        wind_grid_device = cuda.to_device(self.wind_field)
-        goal_device = cuda.to_device(self.goal_position)
-        compute_heuristic_cuda[(blockspergrid_x, blockspergrid_y), threadsperblock](
-            heuristic_table_device,
-            wind_grid_device,
-            goal_device,
-            self.grid_size[0],
-            self.grid_size[1]
-        )
-        self.heuristic_table = heuristic_table_device.copy_to_host()
+        # heuristic_table_device = cuda.to_device(self.heuristic_table)
+        # wind_grid_device = cuda.to_device(self.wind_field)
+        # goal_device = cuda.to_device(self.goal_position)
+        # compute_heuristic_cuda[(blockspergrid_x, blockspergrid_y), threadsperblock](
+        #     heuristic_table_device,
+        #     wind_grid_device,
+        #     goal_device,
+        #     self.grid_size[0],
+        #     self.grid_size[1]
+        # )
+        # self.heuristic_table = heuristic_table_device.copy_to_host()
         
-        # import matplotlib.pyplot as plt
-        # plt.imshow(self.heuristic_table.T, cmap='hot', interpolation='nearest')
-        # plt.colorbar()
-        # plt.title("Heuristic Table Heatmap")
-        # plt.xlabel("X Position")
-        # plt.ylabel("Y Position")
-        # plt.show()
-        # plt.close()
+        compute_recurrent_heuristic_njit(self.heuristic_table, self.wind_field, self.goal_position, self.grid_size)
+        
+        
 
-        path = self.sailing_a_star_action(
+        path,visit_counts,pos_visited = self.sailing_a_star_action(
             self.position,
             self.velocity,
             self.position_accumulator,
@@ -93,15 +93,57 @@ class DeterministicAgent2(BaseAgent):
             heuristic_table=self.heuristic_table if hasattr(self, 'heuristic_table') else None
         )
 
-        if path is not None and len(path) > 1:
+        
+        if path is not None and isinstance(path,list) and len(path) > 1:
             direction = tuple(np.array(path[1]['direction']).astype(np.int32))
             action = self.ACTION_MAP.get(direction, 8)
             self.position = path[1]['pos']
             self.position_accumulator = path[1]['acc']
             self.velocity = path[1]['velocity']
+            self.emergency_actions = path[2:]  # Store remaining actions for emergencies
             return action
         else:
-            return self._greedy_fallback(observation)
+            if path == 'MAX':
+                # print("A* search with dist mode reached max iterations, falling back to Heuristic mode.")
+                pass
+            
+            path,visit_counts,pos_visited = self.sailing_a_star_action(
+            self.position,
+            self.velocity,
+            self.position_accumulator,
+            self.wind_field,
+            self.grid_size,
+            self.goal_position,
+            self.max_speed,
+            mode='heuristic',
+            max_iterations=15000,
+            heuristic_table=self.heuristic_table if hasattr(self, 'heuristic_table') else None
+        )
+            # self.plot_a_star(visit_counts, pos_visited)
+            # print(f"length of path: {len(path)}")
+            if path is not None and isinstance(path,list) and len(path) > 1:
+                direction = tuple(np.array(path[1]['direction']).astype(np.int32))
+                action = self.ACTION_MAP.get(direction, 8)
+                self.position = path[1]['pos']
+                self.position_accumulator = path[1]['acc']
+                self.velocity = path[1]['velocity']
+                self.emergency_actions = path[2:]
+                return action
+            else:
+                if path == 'MAX':
+                    # print("A* search with heursitic mode reached max iterations, falling back to greedy mode.")
+                    pass
+                if self.emergency_actions is not None and len(self.emergency_actions) > 0:
+                    direction = tuple(np.array(self.emergency_actions[0]['direction']).astype(np.int32))
+                    action = self.ACTION_MAP.get(direction, 8)
+                    self.position = self.emergency_actions[0]['pos']
+                    self.position_accumulator = self.emergency_actions[0]['acc']
+                    self.velocity = self.emergency_actions[0]['velocity']
+                    self.emergency_actions = self.emergency_actions[1:]
+                    return action
+                # print("A* failed, using greedy fallback.")
+                
+                return self._greedy_fallback(observation)
 
     def _greedy_fallback(self, observation: np.ndarray) -> int:
         """
@@ -111,7 +153,7 @@ class DeterministicAgent2(BaseAgent):
         Returns:
             int: The action index to take.
         """
-        print("A* failed, using greedy fallback.")
+        # print("A* failed, using greedy fallback.")
         x, y = observation[0], observation[1]
         wx, wy = observation[4], observation[5]
         current_pos = np.array([x, y])
@@ -174,6 +216,71 @@ class DeterministicAgent2(BaseAgent):
             int: The action index to take.
         """
         return self.act_a_star(observation)
+    
+    def plot_a_star(self,visit_counts: np.ndarray, pos_visited: List[Tuple[int, int]]) -> None:
+        """
+        """
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Heuristic Table Heatmap
+        im0 = axes[0].imshow(self.heuristic_table.T, cmap='hot', interpolation='nearest')
+        axes[0].set_title("Heuristic Table Heatmap")
+        axes[0].set_xlabel("X Position")
+        axes[0].set_ylabel("Y Position")
+        plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+        # Visit Counts Heatmap
+        im1 = axes[1].imshow(visit_counts.T, origin='lower', cmap='hot')
+        axes[1].set_title("A* Visited Positions Heatmap")
+        axes[1].set_xlabel("X")
+        axes[1].set_ylabel("Y")
+        plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.show()
+        
+        
+        # Example data
+        # pos_visited = [(i, i) for i in range(10)]
+        fig2, ax2 = plt.subplots(figsize=(6, 6))
+        ax2.set_title("Mist of Visited Positions (Slider)")
+        ax2.set_xlabel("X")
+        ax2.set_ylabel("Y")
+        ax2.set_xlim(-0.5, visit_counts.shape[0] - 0.5)
+        ax2.set_ylim(-0.5, visit_counts.shape[1] - 0.5)
+        ax2.invert_yaxis()
+
+        # Slider setup
+        ax_slider = plt.axes([0.2, 0.02, 0.6, 0.03])
+        slider = Slider(ax_slider, 'Step', 0, len(pos_visited)-1, valinit=0, valstep=1)
+
+        scatter_artists = []
+
+        def on_slider(val):
+            frame = int(val)
+            # Remove previous scatter artists
+            for artist in scatter_artists:
+                artist.remove()
+            scatter_artists.clear()
+            # Show previous position (if any)
+            if frame > 0:
+                x_prev, y_prev = pos_visited[frame-1]
+                prev_artist = ax2.scatter(x_prev, y_prev, c='blue', alpha=0.3, s=120, label='Previous')
+                scatter_artists.append(prev_artist)
+            # Show current position
+            x, y = pos_visited[frame]
+            curr_artist = ax2.scatter(x, y, c='red', alpha=1.0, s=120, label='Current')
+            scatter_artists.append(curr_artist)
+            ax2.legend(loc='upper right')
+            fig2.canvas.draw_idle()
+
+        slider.on_changed(on_slider)
+        on_slider(0)  # Initialize
+
+        plt.show()
+        plt.close(fig2)
+        plt.close(fig)
+
 
     @staticmethod
     def sailing_a_star_action(
@@ -184,6 +291,7 @@ class DeterministicAgent2(BaseAgent):
         grid_size: tuple,
         goal: np.ndarray,
         max_speed: float,
+        mode: str = 'dist',
         inertia_factor: float = 0.3,
         boat_performance: float = 0.4,
         max_iterations: int = None,
@@ -225,7 +333,8 @@ class DeterministicAgent2(BaseAgent):
         counter = 0  # Unique tie-breaker
 
         heapq.heappush(open_set, (
-            heuristic(start_tuple),
+            # np.linalg.norm(start_tuple - goal),
+            np.linalg.norm(start_tuple - goal)**1.2 if mode=='dist' else heuristic(start_tuple),
             0,
             counter,
             start_tuple,
@@ -239,32 +348,41 @@ class DeterministicAgent2(BaseAgent):
                 'efficiency': 0.0
             }]
         ))
-
-        pos_with_highest_y = np.array([0, 0], dtype=np.int32)
-        highest_y = 0
+        visit_counts = np.zeros(grid_size, dtype=np.int32)
+        visit_counts[tuple(start_tuple)] = 1
+        pos_visited = list()
+        pos_visited.append(tuple(start_tuple))
+        # pos_with_highest_y = np.array([0, 0], dtype=np.int32)
+        # highest_y = 0
         visited = set()
         iterations = 0
         if isinstance(grid_size, int):
             grid_size_arr = np.array([grid_size, grid_size], dtype=np.int32)
+        
         else:
             grid_size_arr = np.array(grid_size, dtype=np.int32)
 
         while open_set:
             if max_iterations is not None and iterations >= max_iterations:
-                return None
+                return 'MAX',visit_counts,pos_visited
             iterations += 1
 
-            est_total, cost_so_far, _, current, velocity, acc, path = heapq.heappop(open_set)
-            if current[1] > highest_y:
-                highest_y = current[1]
-                pos_with_highest_y = np.array(current, dtype=np.int32)
+            est_total, cost_so_far, current_counter, current, velocity, acc, path = heapq.heappop(open_set)
+            # if current[1] > highest_y:
+            #     highest_y = current[1]
+            #     pos_with_highest_y = np.array(current, dtype=np.int32)
 
             velocity = np.array(velocity, dtype=np.float32)
             acc = np.array(acc, dtype=np.float32)
 
             if np.linalg.norm(np.array(current) - np.array(goal)) < 1.0:
-                return path
-
+                return path,visit_counts,pos_visited
+            visit_counts[tuple(current)] += 1
+            pos_visited.append(tuple(current))
+            if visit_counts[tuple(current)] > 10:
+                # heuristic_table[tuple(current)] *= 2
+                continue
+            
             neighbors = get_neighbors_numba(
                 np.array(current, dtype=np.float32),
                 velocity.astype(np.float32),
@@ -277,8 +395,8 @@ class DeterministicAgent2(BaseAgent):
             )
             
             
-            visited.add((current, tuple(np.round(velocity, 2)), tuple(np.round(acc, 2))))
-
+            visited.add((current, tuple(np.round(velocity, 1)), tuple(np.round(acc, 1))))
+            counter= current_counter+1
             for i in range(neighbors.shape[0]):
                 neighbor = tuple(neighbors[i, 0:2].astype(np.int32))
                 nvel = tuple(neighbors[i, 2:4])
@@ -287,14 +405,15 @@ class DeterministicAgent2(BaseAgent):
                 wind_direction = tuple(neighbors[i, 8:10])
                 sailing_efficiency = float(neighbors[i, 10])
                 state_id = (neighbor, tuple(np.round(nvel, 2)), tuple(np.round(nacc, 2)))
-
-                if state_id in visited:
+                if state_id in visited or visit_counts[tuple(neighbor)] > 10:
+                    # heuristic_table[neighbor[0], neighbor[1]] *=2
                     continue
 
-                counter += 1
+                
                 heapq.heappush(open_set, (
-                    cost_so_far + 1.0 + heuristic(neighbor),
-                    cost_so_far + 1.0,
+                    # np.linalg.norm(np.array(neighbor) - np.array(goal)),
+                    0.8*(cost_so_far+1)+np.linalg.norm(np.array(neighbor) - np.array(goal))**1.2+ np.random.uniform(-0.1,0.1) if mode=='dist' else 0.8*(cost_so_far+1)+heuristic(neighbor)+ np.random.uniform(-0.1,0.1),
+                    cost_so_far+1,
                     counter,
                     neighbor,
                     nvel,
@@ -308,7 +427,7 @@ class DeterministicAgent2(BaseAgent):
                         'efficiency': sailing_efficiency
                     }]
                 ))
-        return None
+        return None,visit_counts,pos_visited
 
     def calculate_sailing_efficiency(self, boat_direction: np.ndarray, wind_direction: np.ndarray) -> float:
         """
@@ -418,7 +537,7 @@ def compute_heuristic_cuda(heuristic_table, wind_grid, goal, grid_x, grid_y):
         goal1 = float(goal[1])
         dx = goal0 - pos0
         dy = goal1 - pos1
-        dist = math.sqrt(dx * dx + dy * dy)**1.2
+        dist = math.sqrt(dx * dx + dy * dy)**1.15
 
         # Wind at this cell
         wind_x = wind_grid[x, y, 0]
@@ -459,7 +578,76 @@ def compute_heuristic_cuda(heuristic_table, wind_grid, goal, grid_x, grid_y):
         heuristic = dist / max(sailing_efficiency, 0.1)
         heuristic_table[x, y] = heuristic
         
-        
+
+@njit
+def compute_recurrent_heuristic_njit(heuristic_table, wind_grid, goal, grid_size, boat_performance=0.4, max_speed=2.0, inertia_factor=0.3):
+    X, Y = grid_size
+    heuristic_table[:] = np.inf
+    gx, gy = int(goal[0]), int(goal[1])
+    heuristic_table[gx, gy] = 0.0
+
+    # 8-connected grid
+    neighbors = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]
+
+    # Use a simple queue for wavefront expansion (Dijkstra's with uniform cost)
+    queue = [(gx, gy)]
+    while len(queue) > 0:
+        x, y = queue.pop(0)
+        cost = heuristic_table[x, y]
+        wind = wind_grid[x, y]
+        wind_norm = np.sqrt(wind[0]**2 + wind[1]**2)
+        for dx, dy in neighbors:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < X and 0 <= ny < Y:
+                direction = np.array([dx, dy], dtype=np.float32)
+                direction_norm = np.sqrt(direction[0]**2 + direction[1]**2)
+                if direction_norm < 1e-8:
+                    continue
+                direction_normalized = direction / direction_norm
+
+                # Sailing efficiency (same as in env)
+                if wind_norm > 1e-8:
+                    wind_normalized = wind / wind_norm
+                    dot = wind_normalized[0]*direction_normalized[0] + wind_normalized[1]*direction_normalized[1]
+                    if dot < -1.0:
+                        dot = -1.0
+                    elif dot > 1.0:
+                        dot = 1.0
+                    wind_angle = np.arccos(dot)
+                    if wind_angle < np.pi / 4:
+                        sailing_efficiency = 0.05
+                    elif wind_angle < np.pi / 2:
+                        sailing_efficiency = 0.5 + 0.5 * (wind_angle - np.pi / 4) / (np.pi / 4)
+                    elif wind_angle < 3 * np.pi / 4:
+                        sailing_efficiency = 1.0
+                    else:
+                        sailing_efficiency = 1.0 - 0.5 * (wind_angle - 3 * np.pi / 4) / (np.pi / 4)
+                else:
+                    sailing_efficiency = 0.0
+
+                # Theoretical velocity
+                theoretical_velocity = direction * sailing_efficiency * wind_norm * boat_performance
+                speed = np.sqrt(theoretical_velocity[0]**2 + theoretical_velocity[1]**2)
+                if speed > max_speed:
+                    theoretical_velocity = theoretical_velocity / speed * max_speed
+                    speed = max_speed
+                    
+                # For heuristic, use the time to traverse the step (distance / speed)
+                step_dist = 1
+                if speed > 1e-4:
+                    transition_cost = step_dist / (speed)**4 
+                else:
+                    transition_cost = 1e6  # Large penalty if can't move
+
+                # Optionally, add distance to goal for tie-breaking
+                dist_to_goal = np.sqrt((nx - gx)**2 + (ny - gy)**2)
+                total_cost = cost + transition_cost 
+
+                if total_cost < heuristic_table[nx, ny]:
+                    heuristic_table[nx, ny] = total_cost
+                    queue.append((nx, ny))
+                    
+                          
         
 import math
 

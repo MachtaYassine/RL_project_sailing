@@ -53,6 +53,57 @@ def sample_windfield2():
         'wind_evol_params': wind_evol_params
     }
 
+
+def sample_strong_south_windfield():
+    """Sample a windfield with strong wind mostly in negative y direction (~-0.9)."""
+    wind_init_params = {
+        'base_speed': float(np.random.uniform(4.0, 7.0)),  # strong wind
+        'base_direction': (float(np.random.uniform(-0.2, 0.2)), float(np.random.uniform(-1.0, -0.97))),  # mostly south
+        'pattern_scale': int(np.random.choice([32, 64, 96, 128, 192])),
+        'pattern_strength': float(np.random.uniform(0.5, 1.0)),
+        'strength_variation': float(np.random.uniform(0.2, 0.8)),
+        'noise': float(np.random.uniform(0.01, 0.3))
+    }
+    wind_evol_params = {
+        'wind_change_prob': float(np.random.uniform(0.0, 0.5)),
+        'pattern_scale': int(np.random.choice([32, 64, 96, 128, 192])),
+        'perturbation_angle_amplitude': float(np.random.uniform(0.0, 0.2)),
+        'perturbation_strength_amplitude': float(np.random.uniform(0.0, 0.2)),
+        'rotation_bias': float(np.random.uniform(-0.2, 0.2)),
+        'bias_strength': float(np.random.uniform(0.0, 1.0))
+    }
+    return {
+        'wind_init_params': wind_init_params,
+        'wind_evol_params': wind_evol_params
+    }
+    
+    
+def sample_similar_to_training_69():
+    """Sample a windfield similar to TRAINING_INITIAL_WINDFIELD_69."""
+    wind_init_params = {
+        'base_speed': float(np.random.uniform(1.8, 2.3)),  # around 2.08
+        'base_direction': (
+            float(np.random.uniform(-0.25, -0.10)),        # around -0.17
+            float(np.random.uniform(-1.0, -0.95))          # around -0.98
+        ),
+        'pattern_scale': 96,
+        'pattern_strength': float(np.random.uniform(0.3, 0.45)),  # around 0.38
+        'strength_variation': float(np.random.uniform(0.3, 0.5)), # around 0.40
+        'noise': float(np.random.uniform(0.20, 0.30))             # around 0.27
+    }
+    wind_evol_params = {
+        'wind_change_prob': float(np.random.uniform(0.0, 0.01)),  # very low
+        'pattern_scale': 96,
+        'perturbation_angle_amplitude': float(np.random.uniform(0.10, 0.13)),   # around 0.12
+        'perturbation_strength_amplitude': float(np.random.uniform(0.10, 0.13)),# around 0.12
+        'rotation_bias': float(np.random.uniform(0.09, 0.13)),                  # around 0.11
+        'bias_strength': float(np.random.uniform(0.02, 0.06))                   # around 0.04
+    }
+    return {
+        'wind_init_params': wind_init_params,
+        'wind_evol_params': wind_evol_params
+    }
+    
 def windfield_hash(windfield):
     """Hash a windfield for uniqueness (rounded for floating point stability)."""
     p = windfield['wind_init_params']

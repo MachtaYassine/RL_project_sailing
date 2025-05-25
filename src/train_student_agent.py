@@ -16,7 +16,7 @@ from initial_windfields import INITIAL_WINDFIELDS
 from tqdm import tqdm
 
 # Add import for windfield sampling
-from src.initial_windfields.sample_windfields import sample_windfield,sample_windfield2
+from src.initial_windfields.sample_windfields import sample_windfield,sample_windfield2, sample_strong_south_windfield
 
 
 # --- Hyperparameters ---
@@ -32,8 +32,18 @@ os.makedirs(PLOTS_SAVE_DIR, exist_ok=True)
 CHECK_EXPERT_SUCCESS_STRIDE =25  # Print stats every X epochs
 
 # TRAIN_WF = ["training_1", "training_2", "training_3", "training_4", "training_5"]
-VAL_WF = ["training_1", "training_2", "training_3"]
+VAL_WF = ["training_1", "training_2", "training_3","training_69"]
 
+
+def set_batchnorm_eval(module):
+    """Set all BatchNorm layers to eval mode (do not update running stats)."""
+    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        module.eval()
+    for child in module.children():
+        set_batchnorm_eval(child)
+        
+        
+        
 def validate_student(student, windfield_names, max_steps=200, episodes_per_wf=10):
     """
     Evaluate the student agent on a set of windfields.
@@ -190,113 +200,77 @@ def main():
 
     # 3. Initialize StudentAgent and optimizer
     student = CombinedStudentAgent()
-    student.model.train()
-    optimizer = optim.Adam(student.model.parameters(), lr=LEARNING_RATE)
-    criterion = torch.nn.CrossEntropyLoss()
+    if student.mode=="train":
+        student.model.train()
+        optimizer = optim.Adam(student.model.parameters(), lr=LEARNING_RATE)
+        criterion = torch.nn.CrossEntropyLoss()
 
-    # 4. Training loop with validation
-    plt.ion()
-    fig, axs = plt.subplots(2, 2, figsize=(18, 5))
-    train_losses = []
-    val_success_rates = []
-    val_avg_steps = []
-    val_rewards = []  # <-- initialize as list!
-    val_x = []
-    
-    rand_val_success_rates = []
-    rand_val_avg_steps = []
-    rand_val_rewards = []
+        # 4. Training loop with validation
+        plt.ion()
+        fig, axs = plt.subplots(2, 2, figsize=(18, 5))
+        train_losses = []
+        val_success_rates = []
+        val_avg_steps = []
+        val_rewards = []  # <-- initialize as list!
+        val_x = []
+        
+        rand_val_success_rates = []
+        rand_val_avg_steps = []
+        rand_val_rewards = []
 
-    mse_loss = torch.nn.MSELoss()
+        mse_loss = torch.nn.MSELoss()
 
-    for epoch in range(EPOCHS):
-        total_loss = 0
-        for batch_X, batch_y in tqdm(dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}"):
-            student.model.train()  # Ensure model is in training mode
-            batch_X = batch_X.to(student.device)
-            batch_y = batch_y.to(student.device)
-            # Split input
-            obs = batch_X[:, :2054]
-            wind_params = batch_X[:, 2054:2054+13]
-            step = batch_X[:, -1].unsqueeze(1)  # shape (batch, 1)
-            optimizer.zero_grad()
-            logits, pred_wind = student.model(obs, wind_params, step)
-            # Action loss
-            loss_action = criterion(logits, batch_y)
-            # Wind parameter loss (supervise only first 12 if your model predicts 12)
-            loss_wind = mse_loss(pred_wind, wind_params)
-            # Combine losses (you can weight them if desired)
-            loss = loss_action + loss_wind * 0.2
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item() * batch_X.size(0)
-        avg_loss = total_loss / len(dataset)
-        train_losses.append(avg_loss)
-        print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {avg_loss:.4f}")
+        for epoch in range(EPOCHS):
+            total_loss = 0
+            for batch_X, batch_y in tqdm(dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}"):
+                student.model.train()  # Ensure model is in training mode
+                batch_X = batch_X.to(student.device)
+                batch_y = batch_y.to(student.device)
+                # Split input
+                obs = batch_X[:, :2054]
+                wind_params = batch_X[:, 2054:2054+13]
+                step = batch_X[:, -1].unsqueeze(1)  # shape (batch, 1)
+                optimizer.zero_grad()
+                logits, pred_wind = student.model(obs, wind_params, step)
+                # Action loss
+                loss_action = criterion(logits, batch_y)
+                # Wind parameter loss (supervise only first 12 if your model predicts 12)
+                loss_wind = mse_loss(pred_wind, wind_params)
+                # Combine losses (you can weight them if desired)
+                loss = loss_action + loss_wind * 0.2
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item() * batch_X.size(0)
+            avg_loss = total_loss / len(dataset)
+            train_losses.append(avg_loss)
+            print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {avg_loss:.4f}")
 
-        student.model.eval()  # Set model to evaluation mode for validation
-        # Validation and live plotting every CHECK_EXPERT_SUCCESS_STRIDE epochs
-        if (epoch + 1) % CHECK_EXPERT_SUCCESS_STRIDE == 0:
-            print(f"Wind parameter loss accross current batch: {loss_wind.item()}")
-            print(f"Action loss accross current batch: {loss_action.item()}")
-            
-            print(f"Validation after epoch {epoch+1}:")
-            # --- Validation on fixed windfields ---
-            val_rates, val_steps, val_rewards_epoch = validate_student(
-                student, VAL_WF, max_steps=MAX_STEPS_PER_EPISODE, episodes_per_wf=10
-            )
-            mean_val_rate = np.mean(val_rates)
-            mean_val_steps = np.mean(val_steps)
-            mean_val_reward = np.mean(val_rewards_epoch)
-            val_success_rates.append(mean_val_rate)
-            val_avg_steps.append(mean_val_steps)
-            val_rewards.append(mean_val_reward)
-            val_x.append(epoch + 1)
-            print(f"Validation on fixed windfields: Success {mean_val_rate:.2f}, Steps {mean_val_steps:.1f}, Reward {mean_val_reward:.2f}")
+            student.model.eval()  # Set model to evaluation mode for validation
+            # Validation and live plotting every CHECK_EXPERT_SUCCESS_STRIDE epochs
+            if (epoch + 1) % CHECK_EXPERT_SUCCESS_STRIDE == 0:
+                print(f"Wind parameter loss accross current batch: {loss_wind.item()}")
+                print(f"Action loss accross current batch: {loss_action.item()}")
+                
+                print(f"Validation after epoch {epoch+1}:")
+                # --- Validation on fixed windfields ---
+                val_rates, val_steps, val_rewards_epoch = validate_student(
+                    student, VAL_WF, max_steps=MAX_STEPS_PER_EPISODE, episodes_per_wf=10
+                )
+                mean_val_rate = np.mean(val_rates)
+                mean_val_steps = np.mean(val_steps)
+                mean_val_reward = np.mean(val_rewards_epoch)
+                val_success_rates.append(mean_val_rate)
+                val_avg_steps.append(mean_val_steps)
+                val_rewards.append(mean_val_reward)
+                val_x.append(epoch + 1)
+                print(f"Validation on fixed windfields: Success {mean_val_rate:.2f}, Steps {mean_val_steps:.1f}, Reward {mean_val_reward:.2f}")
 
-            # --- Validation on randomized windfields ---
-            rand_successes, rand_steps, rand_rewards = [], [], []
-            for _ in range(3):  # e.g., validate on 3 random windfields
-                windfield = sample_windfield2()
-                successes, steps_list, rewards = [], [], []
-                for ep in range(5):  # e.g., 5 episodes per random windfield
-                    env = SailingEnv(
-                        wind_init_params=windfield['wind_init_params'],
-                        wind_evol_params=windfield['wind_evol_params']
-                    )
-                    seed = random.randint(0, 100000)
-                    obs, _ = env.reset(seed=seed)
-                    student.reset()
-                    steps = 0
-                    success = False
-                    for _ in range(MAX_STEPS_PER_EPISODE):
-                        action = student.act(obs)
-                        obs, reward, done, truncated, info = env.step(action)
-                        steps += 1
-                        if done:
-                            success = True
-                            break
-                        if truncated:
-                            break
-                    successes.append(success)
-                    steps_list.append(steps)
-                    rewards.append(reward * 0.99 ** steps)
-                rand_successes.append(np.mean(successes))
-                rand_steps.append(np.mean(steps_list))
-                rand_rewards.append(np.mean(rewards))
-            # 4th: random problematic windfield from problematic_windfields.py
-            try:
-                import importlib.util
-                spec = importlib.util.spec_from_file_location("problematic_windfields", "problematic_windfields.py")
-                problematic_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(problematic_module)
-                # Get all problematic windfield keys (those added to INITIAL_WINDFIELDS)
-                problematic_keys = [k for k in problematic_module.INITIAL_WINDFIELDS.keys() if k.startswith("training_")]
-                if problematic_keys:
-                    chosen_key = random.choice(problematic_keys)
-                    windfield = problematic_module.INITIAL_WINDFIELDS[chosen_key]
+                # --- Validation on randomized windfields ---
+                rand_successes, rand_steps, rand_rewards = [], [], []
+                for _ in range(3):  # e.g., validate on 3 random windfields
+                    windfield = sample_windfield2()
                     successes, steps_list, rewards = [], [], []
-                    for ep in range(5):
+                    for ep in range(5):  # e.g., 5 episodes per random windfield
                         env = SailingEnv(
                             wind_init_params=windfield['wind_init_params'],
                             wind_evol_params=windfield['wind_evol_params']
@@ -321,63 +295,192 @@ def main():
                     rand_successes.append(np.mean(successes))
                     rand_steps.append(np.mean(steps_list))
                     rand_rewards.append(np.mean(rewards))
-                else:
-                    print("[WARNING] No problematic windfields found for random test.")
+                # 4th: random problematic windfield from problematic_windfields.py
+                try:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("problematic_windfields", "problematic_windfields.py")
+                    problematic_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(problematic_module)
+                    # Get all problematic windfield keys (those added to INITIAL_WINDFIELDS)
+                    problematic_keys = [k for k in problematic_module.INITIAL_WINDFIELDS.keys() if k.startswith("training_")]
+                    if problematic_keys:
+                        chosen_key = random.choice(problematic_keys)
+                        windfield = problematic_module.INITIAL_WINDFIELDS[chosen_key]
+                        successes, steps_list, rewards = [], [], []
+                        for ep in range(5):
+                            env = SailingEnv(
+                                wind_init_params=windfield['wind_init_params'],
+                                wind_evol_params=windfield['wind_evol_params']
+                            )
+                            seed = random.randint(0, 100000)
+                            obs, _ = env.reset(seed=seed)
+                            student.reset()
+                            steps = 0
+                            success = False
+                            for _ in range(MAX_STEPS_PER_EPISODE):
+                                action = student.act(obs)
+                                obs, reward, done, truncated, info = env.step(action)
+                                steps += 1
+                                if done:
+                                    success = True
+                                    break
+                                if truncated:
+                                    break
+                            successes.append(success)
+                            steps_list.append(steps)
+                            rewards.append(reward * 0.99 ** steps)
+                        rand_successes.append(np.mean(successes))
+                        rand_steps.append(np.mean(steps_list))
+                        rand_rewards.append(np.mean(rewards))
+                    else:
+                        print("[WARNING] No problematic windfields found for random test.")
+                        rand_successes.append(np.nan)
+                        rand_steps.append(np.nan)
+                        rand_rewards.append(np.nan)
+                except Exception as e:
+                    print(f"[WARNING] Could not load problematic windfields: {e}")
                     rand_successes.append(np.nan)
                     rand_steps.append(np.nan)
                     rand_rewards.append(np.nan)
-            except Exception as e:
-                print(f"[WARNING] Could not load problematic windfields: {e}")
-                rand_successes.append(np.nan)
-                rand_steps.append(np.nan)
-                rand_rewards.append(np.nan)
-            mean_rand_success = np.mean(rand_successes)
-            mean_rand_steps = np.mean(rand_steps)
-            mean_rand_reward = np.mean(rand_rewards)
-            rand_val_success_rates.append(mean_rand_success)
-            rand_val_avg_steps.append(mean_rand_steps)
-            rand_val_rewards.append(mean_rand_reward)
-            print(f"Validation on randomized windfields: Success {mean_rand_success:.2f}, Steps {mean_rand_steps:.1f}, Reward {mean_rand_reward:.2f}")
+                mean_rand_success = np.mean(rand_successes)
+                mean_rand_steps = np.mean(rand_steps)
+                mean_rand_reward = np.mean(rand_rewards)
+                rand_val_success_rates.append(mean_rand_success)
+                rand_val_avg_steps.append(mean_rand_steps)
+                rand_val_rewards.append(mean_rand_reward)
+                print(f"Validation on randomized windfields: Success {mean_rand_success:.2f}, Steps {mean_rand_steps:.1f}, Reward {mean_rand_reward:.2f}")
 
-            # --- Live Plotting ---
-            axs[0, 0].cla()
-            axs[0, 0].plot(train_losses, label="Train Loss")
-            axs[0, 0].set_xlabel("Epoch")
-            axs[0, 0].set_ylabel("Loss")
-            axs[0, 0].set_title("Training Loss")
-            axs[0, 0].legend()
+                # --- Live Plotting ---
+                axs[0, 0].cla()
+                axs[0, 0].plot(train_losses, label="Train Loss")
+                axs[0, 0].set_xlabel("Epoch")
+                axs[0, 0].set_ylabel("Loss")
+                axs[0, 0].set_title("Training Loss")
+                axs[0, 0].legend()
 
-            axs[0, 1].cla()
-            axs[0, 1].plot(val_x, val_success_rates, marker='o', label="Fixed WF Success Rate")
-            axs[0, 1].plot(val_x, rand_val_success_rates, marker='x', label="Random WF Success Rate")
-            axs[0, 1].set_xlabel("Epoch")
-            axs[0, 1].set_ylabel("Success Rate")
-            axs[0, 1].set_title("Validation Success Rate")
-            axs[0, 1].set_ylim(0, 1.05)
-            axs[0, 1].legend()
+                axs[0, 1].cla()
+                axs[0, 1].plot(val_x, val_success_rates, marker='o', label="Fixed WF Success Rate")
+                axs[0, 1].plot(val_x, rand_val_success_rates, marker='x', label="Random WF Success Rate")
+                axs[0, 1].set_xlabel("Epoch")
+                axs[0, 1].set_ylabel("Success Rate")
+                axs[0, 1].set_title("Validation Success Rate")
+                axs[0, 1].set_ylim(0, 1.05)
+                axs[0, 1].legend()
 
-            axs[1, 0].cla()
-            axs[1, 0].plot(val_x, val_avg_steps, marker='o', label="Fixed WF Avg Steps")
-            axs[1, 0].plot(val_x, rand_val_avg_steps, marker='x', label="Random WF Avg Steps")
-            axs[1, 0].set_xlabel("Epoch")
-            axs[1, 0].set_ylabel("Avg Steps")
-            axs[1, 0].set_title("Validation Avg Steps")
-            axs[1, 0].legend()
+                axs[1, 0].cla()
+                axs[1, 0].plot(val_x, val_avg_steps, marker='o', label="Fixed WF Avg Steps")
+                axs[1, 0].plot(val_x, rand_val_avg_steps, marker='x', label="Random WF Avg Steps")
+                axs[1, 0].set_xlabel("Epoch")
+                axs[1, 0].set_ylabel("Avg Steps")
+                axs[1, 0].set_title("Validation Avg Steps")
+                axs[1, 0].legend()
 
-            axs[1, 1].cla()
-            axs[1, 1].plot(val_x, val_rewards, marker='o', label="Fixed WF Reward")
-            axs[1, 1].plot(val_x, rand_val_rewards, marker='x', label="Random WF Reward")
-            axs[1, 1].set_xlabel("Epoch")
-            axs[1, 1].set_ylabel("Reward")
-            axs[1, 1].set_title("Validation Reward")
-            axs[1, 1].legend()
+                axs[1, 1].cla()
+                axs[1, 1].plot(val_x, val_rewards, marker='o', label="Fixed WF Reward")
+                axs[1, 1].plot(val_x, rand_val_rewards, marker='x', label="Random WF Reward")
+                axs[1, 1].set_xlabel("Epoch")
+                axs[1, 1].set_ylabel("Reward")
+                axs[1, 1].set_title("Validation Reward")
+                axs[1, 1].legend()
 
-            plt.tight_layout()
-            fig.savefig(os.path.join(PLOTS_SAVE_DIR, f"training_progress_epoch_{epoch+1}.png"))
+                plt.tight_layout()
+                fig.savefig(os.path.join(PLOTS_SAVE_DIR, f"training_progress_epoch_{epoch+1}.png"))
+                    
+        # 5. Save the trained model
+        student.save(MODEL_SAVE_PATH)
+        print(f"Model saved to {MODEL_SAVE_PATH}")
+    
+    else:
+        if not student.rl:
+            
+            # === RL Fine-tuning ===
+            RL_EPISODES = 1000
+            RL_LR = 1e-4
+            rl_optimizer = optim.Adam(student.model.parameters(), lr=RL_LR)
+            gamma = 0.99
+
+            def compute_returns(rewards, gamma=0.99):
+                returns = []
+                R = 0
+                for r in reversed(rewards):
+                    R = r + gamma * R
+                    returns.insert(0, R)
+                return torch.tensor(returns, dtype=torch.float32)
+
+            print("Starting RL fine-tuning...")
+            for episode in range(RL_EPISODES):
+                # Sample a random windfield for RL
+                windfield = sample_strong_south_windfield()
+                env = SailingEnv(
+                    wind_init_params=windfield['wind_init_params'],
+                    wind_evol_params=windfield['wind_evol_params']
+                )
+                obs, _ = env.reset()
+                student.reset()
+                done = False
+                episode_rewards = []
+                log_probs = []
+                entropies = []
+                steps = 0
+                student.model.train()           # Enable gradients for all layers
+                set_batchnorm_eval(student.model)  # But keep BatchNorm layers in eval mode
+                while not done and steps < MAX_STEPS_PER_EPISODE:
+                    obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(student.device)
+                    # Forward pass as in act()
+                    dqn_input = obs_tensor[:, :6]
+                    cnn_input = obs_tensor[:, 6:].reshape(-1, 2, 32, 32)
+                    dqn_out = student.model.dqn(dqn_input)
+                    cnn_out = student.model.cnn(cnn_input)
+                    alpha = torch.sigmoid(student.model.attention)
+                    combined = torch.cat([alpha * dqn_out, (1 - alpha) * cnn_out], dim=1)
+                    pred_wind = student.model.wind_head(combined)
+                    step_tensor = torch.tensor([[student.step]], dtype=torch.float32).to(student.device)
+                    action_in = torch.cat([combined, pred_wind, step_tensor], dim=1)
+                    action_logits = student.model.fc(action_in)
+                    dist = torch.distributions.Categorical(logits=action_logits)
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action)
+                    entropy = dist.entropy()
+
+                    next_obs, reward, done, truncated, info = env.step(action.item())
+                    episode_rewards.append(reward)
+                    log_probs.append(log_prob)
+                    entropies.append(entropy)
+
+                    obs = next_obs
+                    student.step += 1
+                    steps += 1
+                    if truncated:
+                        break
+
+                # Compute returns and policy gradient loss
+                returns = compute_returns(episode_rewards, gamma).to(student.device)
+                log_probs = torch.stack(log_probs)
+                loss = - (log_probs * returns).sum()  # Policy gradient loss
                 
-    # 5. Save the trained model
-    student.save(MODEL_SAVE_PATH)
-    print(f"Model saved to {MODEL_SAVE_PATH}")
+                
+                rl_optimizer.zero_grad()
+                loss.backward()
+                rl_optimizer.step()
+
+                if (episode + 1) % 10 == 0:
+                    print(f"[RL] Episode {episode+1}/{RL_EPISODES} | Return: {returns[0].item():.2f} | Steps: {steps}")
+
+                # --- Evaluate on validation windfields every CHECK_EXPERT_SUCCESS_STRIDE episodes ---
+                if (episode + 1) % CHECK_EXPERT_SUCCESS_STRIDE == 0:
+                    student.model.eval()
+                    print(f"\n[RL] Validation after episode {episode+1}:")
+                    val_rates, val_steps, val_rewards_epoch = validate_student(
+                        student, VAL_WF, max_steps=MAX_STEPS_PER_EPISODE, episodes_per_wf=5
+                    )
+                    mean_val_rate = np.mean(val_rates)
+                    mean_val_steps = np.mean(val_steps)
+                    mean_val_reward = np.mean(val_rewards_epoch)
+                    print(f"[RL] Validation on eval windfields: Success {mean_val_rate:.2f}, Steps {mean_val_steps:.1f}, Reward {mean_val_reward:.2f}\n")
+
+            # Save the RL-finetuned model
+            student.save(MODEL_SAVE_PATH.replace('.pth', '_rl.pth'))
+            print(f"RL-finetuned model saved to {MODEL_SAVE_PATH.replace('.pth', '_rl.pth')}")
 
 if __name__ == "__main__":
     main()
