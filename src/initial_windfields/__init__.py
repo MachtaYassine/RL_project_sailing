@@ -162,17 +162,17 @@ TRAINING_INITIAL_WINDFIELD_8 = {
 
 # Dictionary mapping initial windfield names to their parameters
 INITIAL_WINDFIELDS = {
-    'training_1': TRAINING_INITIAL_WINDFIELD_1,
-    'training_2': TRAINING_INITIAL_WINDFIELD_2,
-    'training_3': TRAINING_INITIAL_WINDFIELD_3,
+    # 'training_1': TRAINING_INITIAL_WINDFIELD_1,
+    # 'training_2': TRAINING_INITIAL_WINDFIELD_2,
+    # 'training_3': TRAINING_INITIAL_WINDFIELD_3,
     'simple_static': SIMPLE_STATIC_INITIAL_WINDFIELD
 }
 # Register them in the windfield dictionary
-INITIAL_WINDFIELDS['training_4'] = TRAINING_INITIAL_WINDFIELD_4
-INITIAL_WINDFIELDS['training_5'] = TRAINING_INITIAL_WINDFIELD_5
-INITIAL_WINDFIELDS['training_6'] = TRAINING_INITIAL_WINDFIELD_6
-INITIAL_WINDFIELDS['training_7'] = TRAINING_INITIAL_WINDFIELD_7
-INITIAL_WINDFIELDS['training_8'] = TRAINING_INITIAL_WINDFIELD_8
+# INITIAL_WINDFIELDS['training_4'] = TRAINING_INITIAL_WINDFIELD_4
+# INITIAL_WINDFIELDS['training_5'] = TRAINING_INITIAL_WINDFIELD_5
+# INITIAL_WINDFIELDS['training_6'] = TRAINING_INITIAL_WINDFIELD_6
+# INITIAL_WINDFIELDS['training_7'] = TRAINING_INITIAL_WINDFIELD_7
+# INITIAL_WINDFIELDS['training_8'] = TRAINING_INITIAL_WINDFIELD_8
 
 
 TRAINING_INITIAL_WINDFIELD_9 = {
@@ -195,7 +195,7 @@ TRAINING_INITIAL_WINDFIELD_9 = {
 }
 
 # Register windfield 9 in the windfield dictionary
-INITIAL_WINDFIELDS['training_9'] = TRAINING_INITIAL_WINDFIELD_9
+# INITIAL_WINDFIELDS['training_9'] = TRAINING_INITIAL_WINDFIELD_9
 
 
 
@@ -219,7 +219,7 @@ TRAINING_INITIAL_WINDFIELD_10 = {
 }
 
 # Register windfield 10 in the windfield dictionary
-INITIAL_WINDFIELDS['training_10'] = TRAINING_INITIAL_WINDFIELD_10
+# INITIAL_WINDFIELDS['training_10'] = TRAINING_INITIAL_WINDFIELD_10
 
 
 TRAINING_INITIAL_WINDFIELD_69 = {
@@ -227,9 +227,15 @@ TRAINING_INITIAL_WINDFIELD_69 = {
     'wind_evol_params': {'wind_change_prob': 0.0004478615434269084, 'pattern_scale': 96, 'perturbation_angle_amplitude': 0.11860443642596918, 'perturbation_strength_amplitude': 0.11846540304272153, 'rotation_bias': 0.11277140558059184, 'bias_strength': 0.04065982802711987}
 }
 
-INITIAL_WINDFIELDS['training_69'] = TRAINING_INITIAL_WINDFIELD_69
+# INITIAL_WINDFIELDS['training_69'] = TRAINING_INITIAL_WINDFIELD_69
 
 
+TRAINING_INITIAL_WINDFIELD_11= {
+    'wind_init_params': {'base_speed': 2.0807439078132526, 'base_direction': (-0, -1.0), 'pattern_scale': 96, 'pattern_strength': 0.3763618283505674, 'strength_variation': 0.3957833186524863, 'noise': 0.2694177902805369},
+    'wind_evol_params': {'wind_change_prob': 0.0004478615434269084, 'pattern_scale': 96, 'perturbation_angle_amplitude': 0.11860443642596918, 'perturbation_strength_amplitude': 0.11846540304272153, 'rotation_bias': 0.11277140558059184, 'bias_strength': 0.04065982802711987}
+}
+
+INITIAL_WINDFIELDS['training_11'] = TRAINING_INITIAL_WINDFIELD_11
 
 def get_initial_windfield(name):
     """
